@@ -1,0 +1,320 @@
+---
+title: "The linear regression model"
+subtitle: "Advanced Methods for Regression and Classification"
+author: "Rita Selimi"
+date: "10/21/2024"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+# Set global options for all code chunks
+knitr::opts_chunk$set(echo = TRUE, tidy = TRUE)
+```
+
+## Load the necessary libraries
+
+```{r}
+if (!require(ISLR)) install.packages("ISLR")
+library(ISLR)
+```
+
+## 1. Data Preparation
+
+```{r data_preparation}
+# Load the College dataset 
+data(College, package="ISLR")
+
+# head(College)
+str(College)
+
+# Check for missing data
+print(paste("Number of missing values:", sum(is.na(College))))
+
+# Summary statistics of the number of applications
+summary(College$Apps)
+
+# Visualizing the distribution of Apps to check for skewness
+hist(College$Apps, 
+     main="Distribution of Apps", 
+     xlab="Number of Applications", 
+     breaks=30)
+```
+The `Apps` variable is highly skewed, with most schools having a small number of applications (median = 1558) but a few having very large numbers (maximum = 48094). Using a log transformation for `Apps` makes the data better fit for linear regression, like having normally distributed residuals and consistent variance. This helps the model work more effectively and focus on changes in applications, which is useful when dealing with a wide range of values. I'll proceed with log-transformed `Apps` as the response variable in this model. There is no need to remove missing values using `na.omit(College)` as no missing values were detected in the dataset.
+
+```{r log-transform}
+college_clean <- College
+
+# Apply log transformation to the 'Apps' variable
+college_clean$Log_Apps <- log(college_clean$Apps)
+
+summary(college_clean$Log_Apps)
+
+# Visualizing the distribution of Apps to check for skewness
+hist(college_clean$Log_Apps, 
+     main = "Distribution of Log(Apps)", 
+     xlab = "Log(Number of Applications)", 
+     breaks = 30)
+```
+After the log transformation of `Apps`, the data now looks much more like a normal (bell-shaped) distribution. The mean (7.427) and median (7.351) are now very close, showing that the transformation has reduced skewness. The log transformation has also lessened the impact of outliers and made the data easier to work with.
+
+```{r outliers}
+# Identify outliers using the IQR method
+Q1 <- quantile(college_clean$Log_Apps, 0.25)
+Q3 <- quantile(college_clean$Log_Apps, 0.75)
+IQR_value <- Q3 - Q1
+
+lower_bound <- Q1 - 1.5 * IQR_value
+upper_bound <- Q3 + 1.5 * IQR_value
+
+# Find outliers
+outliers <- college_clean$Log_Apps[
+  college_clean$Log_Apps < lower_bound 
+  | college_clean$Log_Apps > upper_bound]
+print(paste("Number of outliers:", outliers))
+```
+One outlier was identified from Rutgers at New Brunswick, and I decided to keep it since the high number of applications is realistic for a large, well-known public university.
+
+## 2. Estimating the Full Regression Model
+
+### Splitting the data into training and test sets
+
+```{r data-split}
+# Split the data into training and test sets (2/3 training, 1/3 test)
+set.seed(12332281)
+train_indices <- sample(1:nrow(college_clean), size = 2/3 * nrow(college_clean))
+train_data <- college_clean[train_indices, ]
+test_data <- college_clean[-train_indices, ]
+```
+
+### a) Fit the full regression model on the training data
+
+```{r full_model}
+# Fit the linear model on the training data, excluding Apps, Accept, and Enroll
+res <- lm(Log_Apps ~ . - Apps - Accept - Enroll, data = train_data)
+summary(res)
+```
+Variables with a p-value below 0.05 are significant contributors to the model. Significant predictors include: `PrivateYes`, `F.Undergrad`, `Outstate`, `Room.Board`, `S.F.Ratio`, `perc.alumni`, `Expend`, and `Grad.Rate`. Insignificant predictors include: `Top10perc`, `Top25perc`, `P.Undergrad`, `Books`, `PhD`, `Personal`, and `Terminal`.
+
+The residuals show how well the model fits the data. The median residual (0.04) being close to zero means most predictions are near the actual values.
+
+The coefficients show how each variable affects `Log_Apps`. For example, private schools has an estimate of -0.607, meaning they receive fewer applications than public ones, and having more full-time students, higher out-of-state tuition, and higher room and board costs all slightly increase applications.
+
+The model explains approximately **71%** of the variation in why schools receive more or fewer applications, which indicates a strong fit. Even after adjusting for the number of predictors, the model still explains **70%** of the variation. This suggests that the model performs well. On average, the predictions are off by about **0.55 on the log scale**. Additionally, the model is highly significant, with a p-value of less than **2.2e-16**. 
+
+```{r diagnostics, fig.height=8, fig.width=8}
+# Diagnostic plots for the model
+par(mfrow = c(2, 2))
+plot(res)
+```
+**Residuals vs Fitted Plot (Linearity and Constant Variance)**: This plot shows if the residuals are randomly scattered around 0, checks the linearity assumption and helps identify patterns in the residuals. **What we see**: There's a slight curve, meaning the model might not fully capture the linear relationship. Also, the spread increases a bit for higher fitted values, suggesting the variance isn’t completely constant.
+
+**Q-Q Plot (Normality of Residuals)**: This plot checks if the residuals follow a normal distribution. Points should fall close to the diagonal line. **What we see**: Most points follow the line, but some deviations appear at the ends, showing a few outliers or extreme values.
+
+**Scale-Location Plot (Constant Variance)**: This checks if the residuals have consistent spread (constant variance). A flat red line with points randomly spread out. **What we see**: The line curves slightly, and residuals spread more for larger fitted values, but it’s not too extreme.
+
+**Residuals vs Leverage Plot (Influential Points)**: - This shows if any data points have a big influence on the model. Most points should be in the middle, with no strong outliers. **What we see**: A few points, have higher influence, but they don’t seem to affect the model much. 
+
+### b) Comparing Observed vs Predicted Values (Training and Test Data)
+
+The formula for the **Least Squares Estimator**:
+
+$$
+\hat{\beta} = (X^T X)^{-1} X^T Y
+$$
+
+```{r}
+# Get the design matrix X 
+X <- model.matrix(Log_Apps ~ . - Apps - Accept - Enroll, data = train_data)
+Y <- train_data$Log_Apps
+
+# Compute (X^T X)
+XtX <- t(X) %*% X
+
+# Compute (X^T X)^{-1}
+XtX_inv <- solve(XtX)
+
+# Compute X^T Y
+XtY <- t(X) %*% Y
+
+# Compute the LS estimator (beta coefficients)
+beta_hat <- XtX_inv %*% XtY
+
+beta_hat
+```
+
+**How is R handling binary variables (Private), and how can you interpret the corresponding regression coefficient?** R automatically converts binary variables like `Private` (with levels "Yes" and "No") into dummy variables, when used in a regression model. In this case, **PrivateYes** is set to 1 for private schools and 0 for public schools. The coefficient for **PrivateYes** (-0.6232) means that private schools typically receive fewer applications compared to public schools, with the number of applications decreasing by 0.6232 units (on the log scale).
+
+**Compare the resulting coefficients with those obtained from lm().** The manually computed coefficients are nearly identical to those obtained from the `lm()` function. For each variable, the differences are extremely small and likely due to rounding, making them unimportant. This confirms that the manual calculation of the least squares (LS) estimator was performed correctly.
+
+### c) Comparing Observed vs Predicted Values Graphically (Training and Test Data)
+```{r predictions}
+train_pred <- predict(res, newdata = train_data)
+test_pred <- predict(res, newdata = test_data)
+
+# Plot for Training Data
+plot(train_data$Log_Apps, train_pred, 
+     main = "Observed vs Predicted Values (Training Data)", 
+     xlab = "Observed Log(Apps)", 
+     ylab = "Predicted Log(Apps)",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)
+
+# Plot for Test Data
+plot(test_data$Log_Apps, test_pred, 
+     main = "Observed vs Predicted Values (Test Data)", 
+     xlab = "Observed Log(Apps)", 
+     ylab = "Predicted Log(Apps)",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)
+```
+**What do you think about the prediction performance of your model?**
+The model performs reasonably well for both training and test data, with predicted values generally aligning with observed values along the red 45-degree line. However, there is some scatter, especially for lower and higher values of `Log(Apps)`, indicating that the model may have trouble accurately predicting applications for schools with extreme numbers of applications (either very few or very many).This could be due to outliers or non-linear relationships that the linear model doesn't capture well.
+
+The test data shows slightly more scatter than the training data, suggesting some potential overfitting. This means the model might be too specifically tuned to the training data and not generalizing as well to unseen data.
+
+### d) Compute RMSE for both Training and Test Data
+
+To compute the **Root Mean Square Error (RMSE)** separately for the training and test data, you can use the following formula:
+
+$$
+\text{RMSE} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} (y_i - \hat{y_i})^2}
+$$
+
+```{r}
+# Compute RMSE for training data
+train_rmse <- sqrt(mean((train_data$Log_Apps - train_pred)^2))
+cat("Training RMSE:", train_rmse, "\n")
+
+# Compute RMSE for test data
+test_rmse <- sqrt(mean((test_data$Log_Apps - test_pred)^2))
+cat("Test RMSE:", test_rmse)
+```
+**Compare the values. What do you conclude?**
+The Training RMSE is 0.54, and the Test RMSE is 0.60. The test RMSE being slightly higher than the training RMSE indicates that the model performs slightly better on the data it was trained on but still generalizes reasonably well to unseen data. The increase in RMSE for the test data suggests a small degree of overfitting: the model may be fitting the training data a bit too closely, but the difference between the two RMSE values isn't drastic. 
+
+## 3. Estimating the Reduced Model
+
+### (a) Reduced Model: Check for Significance
+
+```{r reduced-model}
+# Fit the reduced linear model (excluding insignificant variables from 2(a))
+reduced_model <- lm(Log_Apps ~ Private + F.Undergrad + Outstate + Room.Board
+                    + S.F.Ratio + perc.alumni + Expend + Grad.Rate, 
+                    data = train_data)
+
+summary(reduced_model)
+```
+**Are now all input variables significant in the model? Why is this not to be expected in general?**
+Yes, in this reduced model, all input variables are significant, but we can notice perc.alumni has lower significance now. Each variable has a p-value below 0.05, which means they all contribute meaningfully. However, it is not always expected that all variables will remain significant after reducing the model. This is because of, multicollinearity where some variables might be highly correlated with others, making it difficult for the model to separate their effects, or random variation in which there can be randomness in the data that causes some variables to appear significant in one model but not in another
+
+### (b) Visualize the Fit and Predictions for the Reduced Model
+
+```{r visualize-fit}
+train_pred_reduced <- predict(reduced_model, newdata = train_data)
+test_pred_reduced <- predict(reduced_model, newdata = test_data)
+
+# Visualizing the fit for training data
+plot(train_data$Log_Apps, train_pred_reduced, 
+     main = "Observed vs Predicted Values (Training Data - Reduced Model)", 
+     xlab = "Observed Log(Apps)", 
+     ylab = "Predicted Log(Apps)",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)
+
+# Visualizing the fit for test data
+plot(test_data$Log_Apps, test_pred_reduced, 
+     main = "Observed vs Predicted Values (Test Data - Reduced Model)", 
+     xlab = "Observed Log(Apps)", 
+     ylab = "Predicted Log(Apps)",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)  
+```
+The plots from the reduced model, compared to the ones with all variables, have a similar alignment between observed and predicted values along the red line. 
+
+### (c) Compute the RMSE for the Reduced Model
+
+```{r compute-rmse}
+# Compute RMSE for training data (reduced model)
+train_rmse_reduced <- sqrt(mean((train_data$Log_Apps - train_pred_reduced)^2))
+cat("Training RMSE (Reduced Model):", train_rmse_reduced, "\n")
+
+# Compute RMSE for test data (reduced model)
+test_rmse_reduced <- sqrt(mean((test_data$Log_Apps - test_pred_reduced)^2))
+cat("Test RMSE (Reduced Model):", test_rmse_reduced)
+```
+When using a reduced model, we would expect the Training RMSE to increase slightly, as the model now has fewer variables to capture the patterns in the data. The test RMSE might remain the same or decrease because removing insignificant variables can help the model generalize better to unseen data. In this case, the Test RMSE has increased slightly, which indicates that it has slightly lower predictive accuracy for the test data. 
+
+The increase in Test RMSE suggests the reduced model may be slightly underfitting the data compared to the full model. However, since the difference is not substantial, the reduced model still performs reasonably well.
+
+### (d) Compare the Full and Reduced Models with ANOVA
+
+```{r anova-compare}
+# Perform ANOVA to compare full and reduced models
+anova(res, reduced_model)
+```
+**Degrees of Freedom (Res.Df)**, the full model has fewer residual degrees of freedom (502) than the reduced model (509). This makes sense because Model 1 includes more predictors, which use up more degrees of freedom. **Residual Sum of Squares (RSS)**, the full model has a lower RSS (155.38) compared to the reduced model (160.52), indicating that the full model fits the data slightly better. **F-statistic (F)**: The F-statistic is 2.3725. This measures the ratio of the improvement in fit by the full model to the additional complexity. A higher F-statistic indicates that the full model provides a significantly better fit. **p-value (Pr(>F))**: The p-value is 0.02154, which is less than 0.05. This indicates that the difference between the full and reduced models is significant. 
+
+## 4. Variable Selection
+### (a) Forward Selection
+
+Starting from the empty model and adding variables that improve the model.
+
+```{r forward-selection}
+# Perform forward stepwise selection (start from the empty model)
+forward_model <- step(lm(Log_Apps ~ 1, data = college_clean), 
+                      scope = formula(res), 
+                      direction = "forward")
+
+summary(forward_model)
+```
+### (b) Backward Selection
+
+Starting from the full model and removing variables that have the least impact on the model.
+
+```{r backward-selection}
+# Perform backward stepwise selection (start from the full model)
+backward_model <- step(res, direction = "backward")
+
+summary(backward_model)
+```
+### (c) Compute RMSE for Both Models
+
+```{r rmse-computation}
+# Predict values using forward model
+forward_pred <- predict(forward_model, newdata = college_clean)
+
+# Predict values using backward model
+backward_pred <- predict(backward_model, newdata = college_clean)
+
+# Compute RMSE for forward model
+forward_rmse <- sqrt(mean((college_clean$Log_Apps - forward_pred)^2))
+cat("Forward Selection RMSE:", forward_rmse, "\n")
+
+# Compute RMSE for backward model
+backward_rmse <- sqrt(mean((college_clean$Log_Apps - backward_pred)^2))
+cat("Backward Selection RMSE:", backward_rmse, "\n")
+```
+The **Forward Selection RMSE** (0.5628) is slightly lower than the **Backward Selection RMSE** (0.5671), indicating that the forward-selected model performs better in predicting the number of applications. 
+
+### (d) Visualize the Fit and Predictions for Both Models
+
+```{r forward-plot}
+# Plot observed vs predicted for forward model
+plot(college_clean$Log_Apps, forward_pred, 
+     main = "Observed vs Predicted Values (Forward Selection)", 
+     xlab = "Observed Log(Apps)", 
+     ylab = "Predicted Log(Apps)",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)  
+
+# Plot observed vs predicted for backward model
+plot(college_clean$Log_Apps, backward_pred, 
+     main = "Observed vs Predicted Values (Backward Selection)", 
+     xlab = "Observed Log(Apps)", 
+     ylab = "Predicted Log(Apps)",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)  
+```
+Both the **Backward Selection** and **Forward Selection** models produce similar results, but the Forward Selection model fits the data slightly better. This is shown by its tighter alignment of predicted values with the observed values along the red line.

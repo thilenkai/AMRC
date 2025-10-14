@@ -1,0 +1,250 @@
+---
+title: "Exercise 2"
+subtitle: "Advanced Methods for Regression and Classification"
+author: "Rita Selimi"
+date: "10/28/2024"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+# Set global options for all code chunks
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, tidy = TRUE)
+```
+
+## Load the necessary libraries
+
+```{r, include=FALSE}
+if (!requireNamespace("cvTools", quietly = TRUE)) {
+  install.packages("cvTools")
+}
+if (!requireNamespace("leaps", quietly = TRUE)) {
+  install.packages("leaps")
+}
+if (!requireNamespace("pls", quietly = TRUE)) {
+  install.packages("pls")
+}
+
+library(pls)
+library(cvTools)
+library(leaps)
+```
+
+## Load Data
+
+```{r load-data}
+# Load the dataset
+load("building.RData")
+
+# Check the data
+head(df)
+# Check the structure of the data
+str(df)
+```
+
+## Data Splitting
+
+```{r data-splitting}
+set.seed(12332281)
+
+# Split the data
+sample_index <- sample(1:nrow(df), size = 2/3 * nrow(df))
+train_data <- df[sample_index, ]
+test_data <- df[-sample_index, ]
+
+# Display the number of samples in each set
+cat("Training set size:", nrow(train_data), "\n")
+cat("Test set size:", nrow(test_data), "\n")
+```
+## 1. Fit regression model on the training data
+
+```{r model-fitting}
+# Fit linear regression model
+model <- lm(y ~ ., data = train_data)
+summary(model)
+```
+In the model output, some variables show `NA` values for their estimates because they are too similar to other variables. This issue, called multicollinearity, happens when certain variables contain almost the same information as others, making it hard for the model to tell their effects apart. To handle this, R leaves out these extra variables by marking them as `NA`. 
+
+### a) Comparing Observed vs Predicted Values (training data)
+
+```{r predictions}
+train_pred <- predict(model, newdata = train_data)
+
+# Plot for Training Data
+plot(train_data$y, train_pred, 
+     main = "Fitted vs Actual Response", 
+     xlab = "Actual Response", 
+     ylab = "Fitted Values",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)
+
+# Compute RMSE for training data
+train_rmse <- sqrt(mean((train_data$y - train_pred)^2))
+cat("Training RMSE:", train_rmse, "\n")
+```
+
+### b) 5-Fold Cross-Validation with 100 Replications (cost=rmspe)
+```{r cross-validation}
+# Fit the model using cross-validation
+cv_results <- cvFit(
+  model,
+  data = train_data,
+  y = train_data$y,
+  cost = rmspe,
+  K = 5, 
+  R = 100 
+)
+print(cv_results)
+
+plot(cv_results, main = "Distribution from 5-Fold Cross-Validation")
+```
+The cross-validation plot shows that most of the RMSE values are close to 10, meaning the model generally predicts well across different parts of the data. However, there are a few outliers with much higher error values, suggesting that the model struggles on certain data subsets. 
+
+### c) 5-Fold Cross-Validation with 100 Replications (cost=rtmspe)
+```{r cross-validation2}
+# Fit the model using cross-validation
+cv_results2 <- cvFit(
+  model,
+  data = train_data,
+  y = train_data$y,
+  cost = rtmspe,
+  K = 5, # 5-fold cross-validation
+  R = 100 # 100 replications
+)
+print(cv_results2)
+
+plot(cv_results2, main = "Distribution from 5-Fold Cross-Validation")
+```
+We are using `rtmspe`, an error metric that reduces the influence of outliers, meaning that the focus in on predicting errors and ignores extreme cases that could skew the results. The plot shows that most of the errors fall within a tight range (between 0.17 and 0.20), indicating that the model performs consistently well across different test sets when outliers are down-weighted.
+
+### d) Comparing Observed vs Predicted Values (test data)
+```{r test-predictions}
+test_pred <- predict(model, newdata = test_data)
+
+# Plot for Test Data
+plot(test_data$y, test_pred, 
+     main = "Fitted vs Actual Response", 
+     xlab = "Actual Response", 
+     ylab = "Fitted Values",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)
+
+# Compute RMSE for testing data
+test_rmse <- sqrt(mean((test_data$y - test_pred)^2))
+cat("Testing RMSE:", test_rmse, "\n")
+```
+The testing RMSE (0.7586) is higher than the training RMSE (0.1929), suggesting that the model performs well on the training data but may be overfitting, as it is less accurate on new test data. The scatter plot for the test data shows that while most predictions follow the red line (indicating a good fit), there is some spread and a few deviations, which contribute to the higher RMSE.
+
+## 2. Best Subset Regression
+### a) Principal Component Regression (PCR)
+```{r}
+# Reduce predictors to top 50 based on variance
+variances <- apply(train_data[, -ncol(train_data)], 2, var)
+top_50_vars <- names(sort(variances, decreasing = TRUE))[1:50]
+train_data_reduced <- train_data[, c(top_50_vars, "y")]
+
+# Fit PCR model on the reduced set of 50 predictors
+pcr_model <- pcr(y ~ ., data = train_data_reduced, scale = TRUE, validation = "CV")
+summary(pcr_model)
+
+# Extract the top 10 components from the PCR model
+pcr_scores <- as.data.frame(pcr_model$scores[, 1:10])
+pcr_scores$y <- train_data$y  # Add the response variable
+```
+First, I calculated the variance of each predictor in the training data and selected the top 50 predictors with the highest variance. This approach ensures that we retain the predictors most likely to contain significant information. Next, I applied Principal Component Regression (PCR) on this reduced dataset of 50 predictors, which creates new components that capture the main patterns in the data. Finally, we extracted the top 10 components from the PCR model, allowing us to limit the model size to 10 regressors. These components, along with the response variable, form a new dataset that can be used for further modeling.
+
+### Best Subset Regression
+```{r best-subset-regression}
+# Run best subset regression with the modified data
+best_subset <- regsubsets(y ~ ., data = pcr_scores, nvmax = 10, really.big = TRUE)
+summary(best_subset)
+```
+
+### b) Plot the Best Subset Results
+
+```{r plot-best-subset}
+# Plot the best subset regression results to determine the best model
+plot(best_subset, scale = "adjr2", main = "Best Subset Regression with PCR Components")
+```
+In this best subset regression plot, we are comparing models with different combinations of components to find the one with the highest adjusted R^2 (a metric used in regression analysis to measure how well a model fits the data, while also accounting for the number of predictors), which indicates the model’s accuracy while adjusting for the number of components used. The model that seems to be the best includes Comp 1` + `Comp 3` + `Comp 4` + `Comp 7` + `Comp 8` + `Comp 10. This model is likely the best choice, as it explains the most variability in the data with a minimal number of components.
+
+### c) Apply lm() on the final best model
+```{r}
+# Fit the linear model using the selected components
+final_model <- lm(y ~ `Comp 1` + `Comp 3` + `Comp 4` + `Comp 7` + 
+                    `Comp 8` + `Comp 10`, data = pcr_scores)
+summary(final_model)
+
+# Evaluate the model with 5-fold cross-validation and 100 replications
+# (1b) Using rmspe as cost
+cv_results_rmspe <- cvFit(
+  final_model,
+  data = pcr_scores,
+  y = pcr_scores$y,
+  cost = rmspe,
+  K = 5,
+  R = 100
+)
+
+# Display and plot the cross-validation results for rmspe
+print(cv_results_rmspe)
+plot(cv_results_rmspe, main = "5-Fold Cross-Validation with RMSPE")
+
+# (1c) Using rtmspe as cost
+cv_results_rtmspe <- cvFit(
+  final_model,
+  data = pcr_scores,
+  y = pcr_scores$y,
+  cost = rtmspe,
+  K = 5,
+  R = 100
+)
+
+# Display and plot the cross-validation results for rtmspe
+print(cv_results_rtmspe)
+plot(cv_results_rtmspe, main = "5-Fold Cross-Validation with RTMSPE")
+```
+The cross-validation results using two error metrics show that, with RMSPE, the model achieved a cross-validated error of approximately 0.35, and with RTMSPE, the model had a lower error of approximately 0.17. These results indicate that the selected model performs well with a relatively low prediction error.
+
+
+### d) Comparing Observed vs Predicted Values (test data)
+```{r}
+# Ensure `test_data_reduced` matches `train_data_reduced` in terms of columns and order
+test_data_reduced <- test_data[, colnames(train_data_reduced)[-ncol(train_data_reduced)]]
+
+# Manually extract means and standard deviation from `train_data_reduced`
+train_means <- apply(train_data_reduced[, -ncol(train_data_reduced)], 2, mean)
+train_sds <- apply(train_data_reduced[, -ncol(train_data_reduced)], 2, sd)
+
+# Center and scale `test_data_reduced` using these means and sds
+test_data_scaled <- scale(test_data_reduced, center = train_means, scale = train_sds)
+
+# Calculate the components manually by projecting on `pcr_model$loadings`
+# This gives us the first 10 principal components for test_data, similar to how we created pcr_scores for the training data.
+pcr_test_scores <- as.data.frame(test_data_scaled %*% pcr_model$loadings[, 1:10])
+
+# Set column names to match `pcr_scores`
+colnames(pcr_test_scores) <- colnames(pcr_scores)[1:10]
+
+# Ensure pcr_test_scores includes the actual `y` values
+pcr_test_scores$y <- test_data$y
+
+# Predict response for the test data using the final model
+test_pred <- predict(final_model, newdata = pcr_test_scores)
+
+# Plot Predicted vs Actual for Test Data
+plot(pcr_test_scores$y, test_pred, 
+     main = "Predicted vs Actual Response (Test Data)", 
+     xlab = "Actual Response", 
+     ylab = "Predicted Values", 
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)
+
+# Calculate RMSE for Test Data
+test_rmse <- sqrt(mean((pcr_test_scores$y - test_pred)^2))
+cat("Test RMSE:", test_rmse, "\n")
+```
+The loadings represent the weights that define each principal component in terms of the original variables.
+
+The RMSE for the test data dropped from 0.76 in the original model to 0.34 after using the best subset model, by this we can conclude that the best subset model significantly improves prediction accuracy. This means the best subset model makes more accurate predictions because it focuses on the most important parts of the data.

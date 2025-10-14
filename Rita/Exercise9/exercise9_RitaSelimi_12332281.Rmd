@@ -1,0 +1,806 @@
+---
+title: "Exercise 9"
+subtitle: "Advanced Methods for Regression and Classification"
+author: "Rita Selimi"
+date: "18/12/2024"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+# Set global options for all code chunks
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, tidy = TRUE)
+
+library(ROCit)
+library(glmnet)
+library(mgcv)
+library(caret)
+library(dplyr)
+```
+
+## Data Preparation
+
+```{r}
+# Load the Diabetes data
+data(Diabetes, package = "ROCit")
+
+# Exclude variables with high missingness
+excluded_vars <- c("id", "bp.2s", "bp.2d")
+diabetes_data <- Diabetes %>% select(-all_of(excluded_vars))
+
+# Impute missing values for `frame` using mode imputation
+mode_impute <- function(x) {
+  levels(x)[which.max(tabulate(match(x, levels(x))))]
+}
+diabetes_data$frame[is.na(diabetes_data$frame)] <- 
+  mode_impute(diabetes_data$frame)
+
+# Remove rows with any missing values
+diabetes_data <- na.omit(diabetes_data)
+
+# Verify the updated dataset
+cat("Remaining rows after removing missing values:", 
+    nrow(diabetes_data), "\n")
+cat("Remaining columns:", ncol(diabetes_data), "\n")
+summary(diabetes_data)
+
+# Check for class imbalance in target variable
+table(diabetes_data$dtest)
+```
+
+```{r}
+# Select only numeric predictors
+numeric_data <- diabetes_data %>% select(-dtest) %>% select_if(is.numeric)
+
+# Compute the correlation matrix
+cor_matrix <- cor(numeric_data, use = "complete.obs")
+cat("Correlation Matrix:\n")
+print(cor_matrix)
+
+# Visualize the correlation matrix
+library(corrplot)
+corrplot(cor_matrix, method = "circle", type = "upper", 
+         tl.cex = 0.8, main = "Correlation Matrix")
+```
+
+The correlation matrix shows strong correlations among **`weight`**,
+**`waist`**, **`hip`**, and **`bmi`** (correlation \> 0.8), indicating
+redundancy. Retaining **`bmi`** is sufficient as it summarizes body
+size, so the other three can be removed. Similarly, **`bp.1s`** and
+**`bp.1d`** are moderately correlated (**0.61**), so keeping only
+**`bp.1s`** is appropriate. Finally, **`stab.glu`** and **`glyhb`** are
+moderately correlated (**0.74**), so one of them can be dropped to
+simplify the model.
+
+```{r}
+# Identify highly correlated pairs (correlation > 0.7 but < 1)
+high_corr <- which(abs(cor_matrix) > 0.7 & abs(cor_matrix) < 1, arr.ind = TRUE)
+cat("Highly Correlated Predictor Pairs:\n")
+print(high_corr)
+
+# Drop redundant predictors
+# Keep 'bmi' (drop 'weight', 'waist', 'hip'), 
+# keep 'bp.1s' (drop 'bp.1d'), keep 'stab.glu' (drop 'glyhb')
+diabetes_data <- diabetes_data %>%
+  select(-waist, -hip, -bp.1d, -glyhb, -ratio, -weight)
+
+# Verify remaining predictors
+cat("Remaining predictors after removing highly correlated ones:\n")
+print(names(diabetes_data))
+```
+
+The cleaned dataset now includes 13 predictors, ensuring less redundancy
+and reducing multicollinearity for building a stable classification
+model.
+
+```{r}
+# Update the training and test splits after removing missing values
+set.seed(123)  # For reproducibility
+train_index <- createDataPartition(diabetes_data$dtest, p = 0.75, list = FALSE)
+train_data <- diabetes_data[train_index, ]
+test_data <- diabetes_data[-train_index, ]
+
+# Print the sizes of the training and test sets
+cat("Training set size after removing missing values:", nrow(train_data), "\n")
+cat("Test set size after removing missing values:", nrow(test_data), "\n")
+```
+
+## 1. Logistic Regression
+
+```{r logistic-regression}
+# Ensure dtest is a factor (0 and 1)
+train_data$dtest <- ifelse(train_data$dtest == "+", 1, 0)
+test_data$dtest <- ifelse(test_data$dtest == "+", 1, 0)
+train_data$dtest <- as.factor(train_data$dtest)
+test_data$dtest <- as.factor(test_data$dtest)
+
+# Fit a logistic regression model using the training set
+logistic_model <- glm(dtest ~ ., data = train_data, family = "binomial")
+
+# Summary of the model
+cat("Logistic Regression Summary:\n")
+print(summary(logistic_model))
+
+# Predict probabilities on the test set
+test_predictions <- predict(logistic_model, 
+                    newdata = test_data, type = "response")
+
+# Convert probabilities to class labels (0 or 1)
+test_class_predictions <- ifelse(test_predictions > 0.5, 1, 0)
+
+# Confusion matrix
+confusion_matrix <- table(Predicted = test_class_predictions, Actual = test_data$dtest)
+cat("Confusion Matrix:\n")
+print(confusion_matrix)
+
+# Calculate misclassification rate
+misclassification_rate <- mean(test_class_predictions != test_data$dtest)
+cat("Misclassification Rate:", misclassification_rate, "\n")
+```
+
+A **logistic regression model** is a statistical model used to predict a
+**binary outcome** (e.g., yes/no, 0/1, success/failure) based on one or
+more predictor variables.
+
+##### Problems Observed in the Logistic Regression Model:
+
+1.  **Insignificant Predictors**:
+    -   Many predictors, including `chol`, `hdl`, `locationLouisa`,
+        `gender`, `height`, `frame`, `bp.1s`, `time.ppn`, `bmi`, and
+        `whr`, have **high p-values** (greater than 0.05), indicating
+        they are not statistically significant.
+    -   Only `stab.glu` (p-value ≈ 2.31e-08) is a strong predictor,
+        while `age`, `bp.1s`, and `time.ppn` show some borderline
+        significance.
+2.  **Potential Underfitting**:
+    -   The **residual deviance** (91.725) is much lower than the **null
+        deviance**, how much the response variable deviates from its
+        mean without considering any predictors (244.226), indicating
+        the model explains a substantial amount of variation in the
+        data.
+    -   However, the misclassification rate (10.75%) suggests the model
+        may struggle to generalize well, particularly for identifying
+        the positive class.
+3.  **Multicollinearity**:
+    -   Multicollinearity issues appear to have been addressed by
+        removing highly correlated variables earlier in the process.
+        This has likely improved model stability, as coefficients are no
+        longer extreme or inconsistent.
+4.  **Confusion Matrix and Class Imbalance**:
+    -   The confusion matrix shows the model performs reasonably well in
+        predicting the negative class (75 true negatives and 4 false
+        positives) but struggles with the positive class (8 true
+        positives and 6 false negatives).
+    -   The imbalance in identifying the positive class is evident and
+        problematic, especially if the goal is to identify diabetes
+        cases accurately.
+
+## 2. Sparse Logistic Regression (Lasso)
+
+```{r sparse-logistic}
+# Prepare data for glmnet (requires matrix for predictors)
+x_train <- model.matrix(dtest ~ ., data = train_data)[, -1]  # Remove intercept
+y_train <- as.numeric(as.character(train_data$dtest))  # Ensure y is numeric (0/1)
+
+x_test <- model.matrix(dtest ~ ., data = test_data)[, -1]
+y_test <- as.numeric(as.character(test_data$dtest))   # Ensure test labels are numeric
+
+# Fit Lasso (alpha = 1) with cross-validation
+set.seed(123)
+# Lasso Regularization (L1), meaning some coefficients are set to zero
+cv_lasso <- cv.glmnet(x_train, y_train, family = "binomial", alpha = 1) 
+
+# Plot cross-validation curve
+plot(cv_lasso)
+cat("Optimal lambda:", cv_lasso$lambda.min, "\n")
+
+# Refit the model using optimal lambda
+lasso_model <- glmnet(x_train, y_train, family = "binomial", 
+                      alpha = 1, lambda = cv_lasso$lambda.min)
+
+# Display coefficients
+lasso_coef <- coef(lasso_model)
+cat("Non-zero coefficients (Lasso):\n")
+print(lasso_coef)
+
+# Predict probabilities on the test set
+lasso_prob <- predict(lasso_model, s = cv_lasso$lambda.min, 
+                      newx = x_test, type = "response")
+
+# Convert probabilities to binary predictions (0 or 1)
+lasso_pred <- ifelse(lasso_prob > 0.5, 1, 0)
+
+# Ensure predictions and actual values are integers for comparison
+lasso_pred <- as.integer(lasso_pred)
+y_test <- as.integer(y_test)
+
+# Confusion Matrix
+lasso_conf_matrix <- table(Predicted = lasso_pred, Actual = y_test)
+cat("Confusion Matrix (Lasso):\n")
+print(lasso_conf_matrix)
+
+# Misclassification Rate
+lasso_misclass_rate <- sum(lasso_pred != y_test) / length(y_test)
+cat("Misclassification Rate (Lasso):", round(lasso_misclass_rate, 4), "\n")
+```
+
+A **sparse logistic regression model** is a variant of logistic
+regression that includes a **regularization term** to penalize complex
+models and encourage sparsity (i.e., setting some coefficients to zero).
+
+#### Interpretation of Lasso Regression Results
+
+1.  **Optimal Lambda**:
+    -   The **optimal lambda** value selected by cross-validation is
+        `0.01122084`. This value minimizes the **binomial deviance** and
+        provides a balance between model complexity and prediction
+        accuracy.
+2.  **Non-Zero Coefficients**:
+    -   Lambda controls the amount of regularization applied to the
+        model. A larger value of λ results in more shrinkage of the
+        coefficients toward zero.
+    -   ndefined**Lasso regression** has performed feature selection by
+        shrinking some coefficients to zero. Out of the original
+        predictors, the following remain in the model:
+        -   `chol` (positive effect)
+        -   `stab.glu` (strong positive effect)
+        -   `age` (positive effect)
+        -   `height` (negative effect)
+        -   `framemedium` (positive effect)
+        -   `bp.1s` (positive effect)
+        -   `time.ppn` (slightly positive effect)
+        -   `bmi` (slightly positive effect)
+    -   Predictors like `hdl`, `locationLouisa`, `gendermale`,
+        `framesmall`, and `whr` were shrunk to zero, indicating they
+        **do not contribute significantly** to the prediction of
+        diabetes.
+3.  **Confusion Matrix**:
+    -   The model **correctly predicts 77 negatives** and **8
+        positives**.
+    -   There are **6 false negatives** and **2 false positives**,
+        indicating the model performs better for the negative class but
+        still struggles with detecting positives.
+4.  **Misclassification Rate**:
+    -   Despite achieving a low misclassification rate of 0.086, the
+        model's ability to predict the positive class remains limited
+
+## 3. Generalized Additive Model (GAM)
+
+```{r}
+names(diabetes_data)
+```
+```{r gam-model}
+# Load the necessary package
+library(mgcv)
+
+# Fit a GAM model (using only linear terms for all predictors)
+gam_model <- gam(dtest ~ chol + stab.glu + age + bmi + 
+                   location + gender + frame, 
+                 data = train_data, family = "binomial")
+#gam_model <- gam(dtest ~ chol + stab.glu + hdl + location + age + gender + height + frame + bp.1s + time.ppn + bmi + whr,
+#                 data = train_data, family = "binomial")
+
+# Summary of the model
+summary(gam_model)
+
+# Predict on test data
+gam_predictions <- predict(gam_model, newdata = test_data, 
+                           type = "response")
+
+# Convert probabilities to class labels
+gam_class_predictions <- ifelse(gam_predictions > 0.5, 1, 0)
+
+# Confusion matrix
+gam_conf_matrix <- table(Predicted = gam_class_predictions, 
+                         Actual = test_data$dtest)
+print(gam_conf_matrix)
+
+# Misclassification rate
+gam_misclass_rate <- mean(gam_class_predictions != test_data$dtest)
+cat("Misclassification Rate (GAM without Smoothness):", 
+    gam_misclass_rate, "\n")
+```
+
+**Generalized Additive Models (GAMs)** allows for flexible, non-linear
+relationships between the predictors (independent variables) and the
+response (dependent variable). This flexibility is achieved using smooth
+functions to model these relationships.
+
+##### Interpretation of the Results:
+
+1.  **Model Fit**:
+    -   The adjusted $R^2$ value is **0.624**, indicating that
+        approximately 62.4% of the variation in the target variable
+        (`dtest`) is explained by the predictors in the model.
+    -   The **Deviance explained** is **59.7%**, further supporting that
+        the model fits the data reasonably well.
+2.  **Parametric Coefficients**:
+    -   **Intercept**: The intercept is highly significant
+        ($p < 0.001$), representing the baseline log-odds of the
+        positive class when all predictors are at their reference or
+        mean values.
+    -   **Significant Predictors**:
+        -   **stab.glu** ($p < 0.001$): Highly significant and
+            positively associated with diabetes risk. A one-unit
+            increase in stabilized glucose increases the log-odds of
+            diabetes by **0.049**.
+        -   **age** ($p = 0.0212$): Significant and positively
+            associated with diabetes risk. Older individuals have a
+            higher likelihood of being classified as diabetic.
+    -   **Non-Significant Predictors**:
+        -   Predictors such as **chol**, **bmi**, **locationLouisa**,
+            **gender**, and **frame** have $p > 0.05$, suggesting they
+            are not strong predictors of diabetes in this model.
+3.  **Classification Performance**:
+    -   **Confusion Matrix**:
+        -   True Negatives (Correctly classified non-diabetics): **76**
+        -   True Positives (Correctly classified diabetics): **9**
+        -   False Negatives (Missed diabetics): **5**
+        -   False Positives (Non-diabetics misclassified as diabetics):
+            **3**
+    -   **Misclassification Rate**:
+        -   The model achieves a misclassification rate of **8.6%**,
+            meaning about 91.4% of the test samples were correctly
+            classified. This is a strong performance for a
+            straightforward logistic regression model.
+4.  **Implications**:
+    -   **stab.glu** is the most important predictor of diabetes,
+        followed by **age**, while the other predictors have limited
+        impact.
+    -   The low misclassification rate and well-balanced confusion
+        matrix indicate that the model is performing well, with minimal
+        bias toward either class.
+5.  **Limitations**:
+    -   Some predictors with high $p$-values could potentially be
+        removed to simplify the model without losing much predictive
+        power.
+    -   The model could still benefit from incorporating interactions or
+        non-linear terms for predictors like **chol** or **bmi** if
+        their relationships with diabetes are complex.
+
+### a)
+
+```{r}
+# Fit the GAM model
+gam_model <- gam(dtest ~ s(chol) + s(stab.glu) + s(age) + s(bmi) + s(bp.1s) + 
+                   location + gender + frame, 
+                 data = train_data, family = "binomial")
+
+# Summary of the GAM model
+cat("GAM Model Summary:\n")
+print(summary(gam_model))
+
+# Predict on the test set
+gam_predictions <- predict(gam_model, newdata = test_data, type = "response")
+
+# Convert probabilities to class labels
+gam_class_predictions <- ifelse(gam_predictions > 0.5, 1, 0)
+
+# Confusion matrix
+gam_conf_matrix <- table(Predicted = gam_class_predictions, 
+                         Actual = test_data$dtest)
+cat("Confusion Matrix (GAM):\n")
+print(gam_conf_matrix)
+
+# Misclassification rate
+gam_misclass_rate <- mean(gam_class_predictions != test_data$dtest)
+cat("Misclassification Rate (GAM):", gam_misclass_rate, "\n")
+```
+We fit a **Generalized Additive Model (GAM)** to predict the binary
+outcome (`dtest`) using a combination of continuous and categorical
+predictors. This allows us to model **non-linear relationships** for
+numeric variables while including categorical predictors as standard
+linear terms.
+
+1.  **Chosen Formula**:
+
+    -   We included **smooth functions** (`s(variable)`) for the
+        **continuous predictors** to allow flexibility in modeling
+        non-linear relationships:
+        -   `s(chol)` → Total cholesterol\
+        -   `s(stab.glu)` → Stabilized glucose\
+        -   `s(age)` → Age of the individual\
+        -   `s(bmi)` → Body Mass Index\
+        -   `s(bp.1s)` → Systolic blood pressure\
+    -   We included **factor variables** (categorical predictors)
+        without smoothing:
+        -   `location` → Location (e.g., Buckingham, Louisa)\
+        -   `gender` → Male/Female\
+        -   `frame` → Body frame size (large, medium, small)
+
+    **Final Formula**: $$
+    \text{dtest} \sim s(\text{chol}) + s(\text{stab.glu}) + s(\text{age}) + s(\text{bmi}) + s(\text{bp.1s}) + \text{location} + \text{gender} + \text{frame}
+    $$
+
+**Why Did We Choose This Formula?**
+
+1.  **Continuous Predictors**:
+    -   Using `s()` on numeric predictors allows the model to flexibly
+        adapt to **non-linear relationships** that might exist between
+        these variables and the target (`dtest`).
+2.  **Factor Predictors**:
+    -   Categorical variables like `location`, `gender`, and `frame` are
+        included **linearly** because smooth functions (`s()`) are not
+        meaningful for non-numeric data.
+3.  **Balancing Complexity**:
+    -   By applying smoothing only where it makes sense, we reduce
+        unnecessary complexity while still capturing important patterns
+        in the data.
+
+##### Interpretation of the GAM Results:
+
+1.  **Model Summary**:
+    -   The **GAM** model uses a **binomial family** with a logit link
+        to predict the binary outcome `dtest` (presence/absence of
+        diabetes).
+    -   The formula includes smooth terms for continuous variables
+        (**chol**, **stab.glu**, **age**, **bmi**, **bp.1s**) and linear
+        terms for categorical variables (**location**, **gender**,
+        **frame**).
+2.  **Parametric Coefficients**:
+    -   **Intercept**: Statistically significant with a negative
+        estimate (-3.8651), suggesting a lower baseline log-odds for the
+        positive class.
+    -   **Location**, **Gender**, and **Frame**: All have **high
+        p-values** (\> 0.05), indicating that they are not statistically
+        significant predictors of the outcome.
+3.  **Smooth Terms**:
+    -   **s(stab.glu)**: Highly significant (**p-value \< 2e-16**) and
+        contributes meaningfully to the model, showing a strong
+        non-linear relationship with the outcome.
+    -   **s(chol)**, **s(bmi)**, and **s(bp.1s)**: Not significant but
+        suggest some non-linear trends (e.g., higher effective degrees
+        of freedom, `edf`).
+    -   **s(age)**: Shows no significant effect, suggesting age may not
+        play a strong role in this model.
+4.  **Model Performance**:
+    -   **Deviance Explained**: The model explains **69.6%** of the
+        deviance, indicating a reasonably good fit.
+    -   **Adjusted R-sq**: Approximately **0.71**, showing a high
+        proportion of variance explained by the model.
+5.  **Confusion Matrix and Misclassification Rate**:
+    -   The model correctly classified most observations but struggled
+        with identifying positive cases (diabetes), as shown by the **7
+        false negatives**.
+    -   **Misclassification Rate**: **12.9%** (0.129), indicating that
+        the model misclassified \~13% of the observations.
+
+Smoothness should only be applied to variables with evidence of
+non-linear relationships. In our dataset, most relationships appear
+linear, making smoothness unnecessary. Simpler models often perform
+better on small datasets or when the relationships between variables and
+the target are straightforward.
+
+### b)
+
+```{r}
+# Fit the GAM model with limited degrees of freedom for smooth terms
+gam_model <- gam(dtest ~ s(chol, k = 5) + s(stab.glu, k = 5) + s(age, k = 4) + 
+                   s(bmi, k = 5) + s(bp.1s, k = 5) + 
+                   location + gender + frame, 
+                 data = train_data, family = "binomial")
+
+# Summary of the GAM model
+cat("GAM Model Summary with Limited Degrees of Freedom:\n")
+print(summary(gam_model))
+
+# Predict on the test set
+gam_predictions <- predict(gam_model, newdata = test_data, type = "response")
+
+# Convert probabilities to class labels
+gam_class_predictions <- ifelse(gam_predictions > 0.5, 1, 0)
+
+# Confusion matrix
+gam_conf_matrix <- table(Predicted = gam_class_predictions, 
+                         Actual = test_data$dtest)
+cat("Confusion Matrix (GAM with Limited Degrees of Freedom):\n")
+print(gam_conf_matrix)
+
+# Misclassification rate
+gam_misclass_rate <- mean(gam_class_predictions != test_data$dtest)
+cat("Misclassification Rate (GAM with Limited Degrees of Freedom):",
+    gam_misclass_rate, "\n")
+```
+
+When the model draws a curve to show the relationship between a predictor (like age) and the response (like diabetes), it splits the curve into pieces to make it smooth. k tells the model how many pieces (or bends) it can use to draw the curve. A small k means the curve is simpler (fewer bends), while a large k allows the curve to wiggle more.
+
+**Solution: Limiting the Degrees of Freedom with `k`** The `k` parameter
+in the `s()` function sets an **upper bound on the effective degrees of
+freedom** for the smooth term, effectively limiting the number of
+parameters that the model can estimate for that variable. Where: -
+`variable` is the numeric predictor being smoothed. - `k` is the maximum
+number of basis functions (related to the degrees of freedom). A smaller
+`k` limits the model's flexibility.
+
+**When to Use `k`** - **Small Sample Sizes:** If your dataset is small,
+reducing `k` ensures the model does not overfit. - **Nearly Linear
+Relationships:** If the relationship between a variable and the target
+is almost linear, setting a small `k` encourages the model to use a
+simpler, less flexible smooth. - **Computational Efficiency:** Reducing
+`k` can speed up model fitting.
+
+##### Interpretation of Results
+
+-   The **adjusted R-squared (R-sq.)** of 0.67 indicates that the model
+    explains **67% of the variation** in the target variable, which is
+    relatively strong.
+-   The **deviance explained (66.2%)** supports the conclusion that the
+    model captures a significant portion of the variability in the data.
+-   The **UBRE score (-0.6117)** is a measure of model fit; lower values
+    generally indicate better fit for GAMs.
+
+Parametric Coefficients - The **intercept** is significant (**p-value \<
+0.001**), indicating the model baseline prediction without considering
+predictors. - None of the categorical predictors (**location, gender,
+and frame**) are statistically significant, with **p-values \> 0.05**. -
+Example: `locationLouisa` has a p-value of 0.505, showing that the
+location does not contribute significantly to predicting diabetes
+status.
+
+Comparison to GAM Without Limited Degrees of Freedom - The model with
+limited degrees of freedom achieves a similar misclassification rate
+(**8.6%**) as the model without limits. - However, by constraining the
+degrees of freedom (`k`), the model is less likely to overfit and is
+computationally more efficient.
+
+1.  **Stab.glu (stabilized glucose)** is the most influential predictor,
+    with a highly significant smooth term (**p \< 0.001**).
+2.  **Chol (cholesterol)** shows a marginally significant non-linear
+    effect, suggesting further investigation might improve the model.
+3.  Constraining the degrees of freedom through `k` helped reduce
+    overfitting risks without compromising predictive accuracy.
+4.  The low misclassification rate demonstrates that the model
+    effectively distinguishes between diabetic and non-diabetic cases,
+    but further refinement could address false negatives.
+
+### c)
+
+##### Significant Variables in the Model
+
+1.  **Parametric Terms:**
+    -   None of the categorical variables (**location**, **gender**,
+        **frame**) are significant:
+        -   Example: `locationLouisa` has a **p-value = 0.505**,
+            indicating no significant contribution to the model.
+    -   The intercept is statistically significant (**p \< 0.001**),
+        setting the baseline for predictions.
+2.  **Smooth Terms:**
+    -   **s(stab.glu)** (stabilized glucose) is **highly significant**
+        with **p \< 0.001**, indicating a strong influence on diabetes
+        prediction. This smooth function is essential for capturing the
+        relationship between glucose levels and diabetes risk.
+    -   **s(chol)** (cholesterol) is **marginally significant** with **p
+        = 0.0553**, suggesting it may have a weak non-linear effect on
+        the target variable.
+    -   Other smooth terms:
+        -   **s(age)**, **s(bmi)**, and **s(bp.1s)** are not significant
+            (**p \> 0.05**), implying no strong evidence of non-linear
+            relationships for these predictors.
+
+##### Complexity of the Smooth Functions
+
+The complexity of smooth functions is determined by the **effective
+degrees of freedom (edf)**: - **s(chol)**: **edf = 3.538**, indicating
+moderate complexity. This suggests the function is flexible enough to
+capture non-linear patterns but is not overly complex. -
+**s(stab.glu)**: **edf = 1.000**, indicating a **linear effect**. This
+means the relationship is nearly linear and does not require additional
+flexibility. - **s(age)**, **s(bmi)**, and **s(bp.1s)**: - **edf =
+1.000** for **age** and **bmi**, meaning these are treated as linear
+terms. - **s(bp.1s)** has **edf = 1.907**, indicating a slight
+non-linearity, but its contribution is not statistically significant
+(**p = 0.1876**).
+
+### d)
+
+```{r}
+# Plot smoothed terms with shaded confidence intervals
+plot(gam_model, page = 1, shade = TRUE, shade.col = "yellow", seWithMean = TRUE)
+```
+
+##### What This Does
+
+The plot shows how the explanatory variables (**chol**, **stab.glu**,
+**age**, **bmi**, and **bp.1s**) relate to the response variable
+(**dtest**) in the model. Each curve represents the smoothed effect of
+the variable on the log-odds of the response. The shaded yellow areas
+show the confidence intervals, which indicate the level of certainty
+around the estimates. A flat line at zero means the variable has no
+effect.
+
+##### Interpretation of the Plots
+
+1.  **s(chol):**\
+    The relationship between **chol** and the response is weak and
+    slightly non-linear. The curve dips, flattens, and then rises, but
+    the wide yellow confidence intervals at extreme values show there is
+    high uncertainty for very low and very high **chol** levels. This
+    suggests there are fewer observations in these ranges.
+
+2.  **s(stab.glu):**\
+    There is a clear positive trend between **stab.glu** and the
+    response. As **stab.glu** increases, the probability of a positive
+    response (dtest = 1) also increases. The narrow confidence intervals
+    show strong certainty about this effect, making it the most
+    important predictor.
+
+3.  **s(age):**\
+    The curve for **age** is almost flat, showing that it has little or
+    no impact on predicting the response. The narrow confidence
+    intervals confirm that this variable is not significant in the
+    model.
+
+4.  **s(bmi):**\
+    The curve for **bmi** shows a slight upward trend, indicating a
+    small positive association with the response. However, the effect is
+    subtle and does not contribute much to the model.
+
+5.  **s(bp.1s):**\
+    The relationship for **bp.1s** is slightly non-linear, with a small
+    dip followed by a rise. The effect is weak, and the confidence
+    intervals widen at the extremes, showing less certainty for very low
+    and very high values.
+
+##### Key Takeaways
+
+-   **stab.glu** is the most important variable, with a clear and strong
+    positive effect.\
+-   Variables like **chol** and **bp.1s** show weak, non-linear effects,
+    while **age** and **bmi** contribute very little to the model.\
+-   Confidence intervals are wider at the extremes of some variables,
+    indicating uncertainty due to fewer observations in these ranges.\
+-   Overall, **stab.glu** stands out as the most reliable predictor,
+    while other variables have limited or weak contributions.
+
+### e)
+
+```{r}
+# Confusion matrix
+gam_conf_matrix <- table(Predicted = gam_class_predictions, 
+                         Actual = test_data$dtest)
+cat("Confusion Matrix (GAM with Limited Degrees of Freedom):\n")
+print(gam_conf_matrix)
+
+# Misclassification rate
+gam_misclass_rate <- mean(gam_class_predictions != test_data$dtest)
+cat("Misclassification Rate (GAM with Limited Degrees of Freedom):",
+    gam_misclass_rate, "\n")
+```
+
+### f)
+
+```{r}
+library(gam)
+
+# ??gam
+# help("gam", package = "gam")
+# conflicts()
+
+# find("step.gam")
+
+# sessionInfo()
+
+# ls("package:gam")
+```
+
+```{r}
+# Start with all variables
+current_formula <- dtest ~ s(chol) + s(stab.glu) + s(age) + s(bmi) +
+                   s(bp.1s) + location + gender + frame
+
+# Fit the initial model
+initial_gam <- gam(current_formula, data = train_data, family = "binomial")
+cat("Initial Model Summary:\n")
+print(summary(initial_gam))
+
+# Step 1: Identify insignificant variables
+# Look at p-values and smooth terms for manual decisions
+insignificant_vars <- c("age", "bmi", "location", "gender", "frame") 
+
+# Step 2: Iteratively drop variables and refit
+for (var in insignificant_vars) {
+  cat("\nDropping:", var, "\n")
+  
+  # Update formula by removing the variable
+  current_formula <- update(current_formula, paste(". ~ . -", var))
+  
+  # Refit the model
+  updated_gam <- mgcv::gam(current_formula, data = train_data, family = "binomial")
+  print(summary(updated_gam))
+  
+  # Predict on test data
+  gam_pred <- predict(updated_gam, newdata = test_data, type = "response")
+  gam_class <- ifelse(gam_pred > 0.5, 1, 0)
+  
+  # Evaluate performance
+  conf_matrix <- table(Predicted = gam_class, Actual = test_data$dtest)
+  cat("Confusion Matrix:\n")
+  print(conf_matrix)
+  
+  misclass_rate <- mean(gam_class != test_data$dtest)
+  cat("Misclassification Rate:", misclass_rate, "\n")
+  
+  # Decide to keep or drop the variable based on misclassification rate
+  if (misclass_rate > 0.2) {  
+    cat(var, "seems important, re-adding it back.\n")
+    current_formula <- update(current_formula, paste(". ~ . +", var))
+  }
+}
+
+# Final Model
+cat("\nFinal Model Summary:\n")
+final_gam <- mgcv::gam(current_formula, data = train_data, family = "binomial")
+print(summary(final_gam))
+```
+
+##### Comparison of Misclassification Rates:
+
+The **GAM with limited degrees of freedom** had a lower
+misclassification rate of 8.6% compared to the **manually selected
+GAM**, which had a misclassification rate of 10.75%. The GAM with
+limited degrees of freedom controlled for complexity by restricting the
+smoothness of the predictors (`k`). This likely reduced overfitting and
+helped the model generalize better to new data.
+
+The manually selected GAM was created by keeping variables that showed
+some statistical significance, but it retained predictors like `s(age)`
+and `s(bmi)` that did not contribute strongly to the model. This may
+have added unnecessary noise and slightly worsened the predictive
+performance compared to the restricted model.
+
+Both models identified **s(chol)** and **s(stab.glu)** as the most
+important predictors. These variables consistently showed strong
+significance and were critical to the predictive performance of the
+models. However, the manually selected GAM also kept weaker predictors
+like `s(age)` and `s(bmi)`, which increased the complexity without a
+clear improvement in accuracy.
+
+In summary, the GAM with restricted degrees of freedom performed better,
+achieving a lower misclassification rate while maintaining a simpler and
+more efficient model. The manually selected GAM, while still effective,
+could have been improved by focusing only on the most significant
+predictors.
+
+### g)
+
+```{r}
+# Fit a GAM with selected variables from (f)
+selected_formula <- dtest ~ s(chol) + s(stab.glu) + s(age) + s(bmi) + s(bp.1s)
+
+selected_gam <- mgcv::gam(selected_formula, 
+                          data = train_data, family = "binomial")
+
+# Summary of the updated model
+cat("Summary of GAM with Selected Variables:\n")
+print(summary(selected_gam))
+
+# Predict on the test set
+selected_gam_pred <- predict(selected_gam, 
+                             newdata = test_data, type = "response")
+selected_gam_class <- ifelse(selected_gam_pred > 0.5, 1, 0)
+
+# Confusion matrix
+conf_matrix <- table(Predicted = selected_gam_class, 
+                     Actual = test_data$dtest)
+cat("Confusion Matrix:\n")
+print(conf_matrix)
+
+# Misclassification rate
+misclass_rate <- mean(selected_gam_class != test_data$dtest)
+cat("Misclassification Rate (Selected GAM):", misclass_rate, "\n")
+```
+
+The selected GAM model uses `chol`, `stab.glu`, `age`, `bmi`, and
+`bp.1s` as predictors. Among these, `chol` and `stab.glu` are the most
+important variables, showing significant effects on predicting `dtest`,
+while `bp.1s` is borderline significant. `age` and `bmi` do not have
+strong evidence of being significant in this model. The model explains
+about 70.6% of the variability in the data and has a misclassification
+rate of 10.75%, which is slightly higher than the GAM with limited
+degrees of freedom (8.6%). However, this rate is reasonable and
+demonstrates that the model balances simplicity and prediction accuracy
+well.

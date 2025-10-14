@@ -1,0 +1,2 @@
+"0","data(Auto,package=""ISLR"")"
+"0","x <- Auto[,-9]"

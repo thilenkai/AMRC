@@ -1,0 +1,866 @@
+---
+title: "Exercise 6"
+subtitle: "Advanced Methods for Regression and Classification"
+author: "Rita Selimi"
+date: "27/11/2024"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+# Set global options for all code chunks
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, tidy = TRUE)
+```
+
+# Predict Status
+
+```{r load-data}
+# Load the Loan dataset
+data("Loan", package = "ROCit")
+
+# View the dataset's structure
+str(Loan)
+head(Loan)
+summary(Loan)
+```
+
+1.  **`Amount`**: The loan amount in thousands
+2.  **`Term`**: The term of the loan in months
+3.  **`IntRate`**: The interest rate as a decimal
+4.  **`ILR`**: An index value representing the individual's loan rate
+5.  **`EmpLen`**: Employment length categorized into 5 levels
+6.  **`Home`**: Home ownership status categorized into 3 levels
+7.  **`Income`**: The individual's income in dollars
+8.  **`Status`**: Loan repayment status with two levels
+9.  **`Score`**: A score associated with the individual’s loan profile
+
+## 1. Linear Discrimant Analysis (LDA)
+
+### (a) Apply lda()
+
+LDA (Linear Discriminant Analysis) is a classification method that finds
+the linear combination of predictors that best separates two or more
+classes. It assumes the data for each class is normally distributed and
+uses these linear combinations to assign new observations to one of the
+classes.
+
+#### Preprocessing
+
+```{r}
+# Ensure the response variable is a factor
+Loan$Status <- as.factor(Loan$Status)
+
+# Remove the constant variable "Term"
+Loan <- Loan[, !(names(Loan) %in% "Term")]
+```
+
+The response variable Status must be a factor because discriminant
+analysis methods (lda(), qda(), etc.) require categorical group labels
+for classification tasks.
+
+The column Term has the same value for all observations within at least
+one group of Status. Since it doesn't vary, it provides no information
+to distinguish between classes. Constant variables cause an error in
+lda() because they make it impossible to calculate the covariance
+matrix.
+
+**Check for Missing Values**
+
+```{r check-missing}
+# Check for missing values
+sum(is.na(Loan))
+```
+
+**Check for skewness and log transform highly skewed variables**
+
+```{r}
+# Load the necessary package
+library(moments)
+
+# Select numeric variables from the dataset
+numeric_vars <- Loan[, sapply(Loan, is.numeric)]
+
+# Compute skewness for each numeric variable
+skewness_values <- sapply(numeric_vars, skewness)
+
+# Display skewness values
+skewness_values
+```
+
+```{r}
+Loan$Amount <- log(Loan$Amount + 1)
+Loan$Income <- log(Loan$Income + 1)  # Add 1 to avoid issues with zero values
+```
+
+**Scale Numerical Variables**
+
+```{r scale-numerical}
+numeric_vars <- sapply(Loan, is.numeric)
+Loan[, numeric_vars] <- scale(Loan[, numeric_vars])
+
+# Confirm scaling
+summary(Loan)
+```
+
+LDA uses a covariance matrix, which is sensitive to the scale of the
+predictors. If one variable has a much larger range than another (e.g.,
+Income vs. IntRate), it will dominate the covariance calculation.
+Scaling ensures that all variables contribute equally.
+
+**Encoding Categorical Variables**
+
+```{r}
+Loan$EmpLen <- as.numeric(Loan$EmpLen)
+Loan$Home <- as.numeric(Loan$Home)
+```
+
+**Checking Correlation**
+
+```{r}
+library(caret)
+
+# Exclude `Status` from correlation analysis
+numeric_vars <- Loan[, sapply(Loan, is.numeric) & names(Loan) != "Status"]
+
+# Compute correlation matrix for numeric predictors
+cor_matrix <- cor(numeric_vars)
+
+# Find highly correlated features (cutoff = 0.9)
+high_corr <- findCorrelation(cor_matrix, cutoff = 0.9)
+
+# Remove highly correlated features from Loan dataset
+Loan <- Loan[, -high_corr]
+```
+
+We are removing highly correlated predictors like `IntRate` to improve
+the stability of the LDA model by avoiding redundancy in the covariance
+matrix. The response variable `Status` is excluded from correlation
+analysis to ensure only predictors are evaluated.
+
+#### Split the data
+
+```{r split-data}
+# Set a seed for reproducibility
+set.seed(12332281)
+
+# Split data into training and test sets
+train_indices <- sample(1:nrow(Loan), size = 2/3 * nrow(Loan))
+train_data <- Loan[train_indices, ]
+test_data <- Loan[-train_indices, ]
+```
+
+#### Apply lda()
+
+```{r}
+# Load required library
+library(MASS)
+
+# Apply Linear Discriminant Analysis
+lda_model <- lda(Status ~ ., data = train_data)
+
+# Print LDA model details
+lda_model
+```
+
+1.  **Prior Probabilities:**\
+    The model sees that the `FP` group dominates the training data, with
+    about 87% of observations, while `CO` makes up only 13%.
+
+2.  **Group Means:**\
+    These are the average values of the predictors (`Amount`, `ILR`,
+    etc.) for each class (`CO` and `FP`). For example:
+
+    -   `ILR` is higher for `CO` (0.564) compared to `FP` (-0.061),
+        which may help the model differentiate between the two groups.
+
+3.  **Coefficients of Linear Discriminants:**\
+    These coefficients show how much each predictor contributes to
+    separating the two groups. For example:
+
+    -   `ILR` has the largest coefficient (-0.853), making it the most
+        important predictor for distinguishing `CO` from `FP`.
+    -   Other predictors like `Income` (0.474) also contribute but to a
+        lesser extent.
+    -   Predictors with smaller coefficients, like `Amount` (-0.011),
+        have little influence on classification.
+
+### b) Compute the evaluation measures
+
+```{r}
+# Predict on the training data
+lda_predictions <- predict(lda_model, train_data)$class
+
+# Create a confusion matrix
+confusion_matrix <- table(Predicted = lda_predictions, Actual = train_data$Status)
+print(confusion_matrix)
+
+# Calculate misclassification rate
+misclassified <- sum(confusion_matrix) - sum(diag(confusion_matrix))  # FP + FN
+total <- sum(confusion_matrix)  # FP + TN + FN + TP
+misclassification_rate <- misclassified / total
+cat("Misclassification Rate:", round(misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp <- confusion_matrix["FP", "FP"]
+true_positives_co <- confusion_matrix["CO", "CO"]
+actual_fp <- sum(confusion_matrix[, "FP"])
+actual_co <- sum(confusion_matrix[, "CO"])
+
+tpr_fp <- true_positives_fp / actual_fp  # TPR for FP
+tpr_co <- true_positives_co / actual_co  # TPR for CO
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp <- confusion_matrix["FP", "CO"]
+false_positives_co <- confusion_matrix["CO", "FP"]
+true_negatives_fp <- confusion_matrix["CO", "CO"]
+true_negatives_co <- confusion_matrix["FP", "FP"]
+
+tnr_fp <- true_negatives_fp / (true_negatives_fp + false_positives_co)  # TNR for FP
+tnr_co <- true_negatives_co / (true_negatives_co + false_positives_fp)  # TNR for CO
+
+# Compute balanced accuracy
+balanced_accuracy <- (tpr_fp + tnr_fp) / 2
+cat("Balanced Accuracy:", round(balanced_accuracy, 4), "\n")
+```
+
+**Confusion Matrix:** `CO` is rarely predicted correctly (only **2 out
+of 77** true `CO` instances are classified as `CO`). `FP` is predicted
+correctly almost perfectly (**522 out of 523**).
+
+3.  **Misclassification Rate:**
+    -   Calculates the proportion of misclassified observations: $$
+        \text{Misclassification Rate} = \frac{\text{FP} + \text{FN}}{\text{Total Observations}}
+        $$The model misclassifies about 12.67% of the observations,
+        indicating it performs well overall but struggles with minority
+        class `CO`.
+4.  **Balanced Accuracy:**
+    -   First, it computes:
+        -   **TPR:** The proportion of correctly classified instances of
+            a given class.
+        -   **TNR:** The proportion of correctly identified negatives
+            for a given class.
+    -   Then, averages these rates: $$
+        \text{Balanced Accuracy} = \frac{\text{TPR} + \text{TNR}}{2}
+        $$This value reflects the model's poor performance on the
+        minority class (`CO`), as it heavily favors the majority class
+        (`FP`).
+
+The model performs well overall, with a low misclassification rate of
+12.67%. The balanced accuracy of 83.24% indicates that the model
+performs reasonably well, though it still struggles with the minority
+class (`CO`). While it correctly identifies nearly all `FP` instances,
+only 2 out of 77 `CO` instances are correctly classified. To further
+improve the classification of the minority class, techniques like
+oversampling, undersampling, or SMOTE could be considered.
+
+### c) Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions <- predict(lda_model, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+The model performs poorly on the test data, with a misclassification
+rate of 18.67% and a low balanced accuracy of 40.94%. While it correctly
+classifies most `FP` instances (244 out of 246), it completely fails to
+classify the minority class `CO`, misclassifying all 54 `CO` instances
+as `FP`. This indicates significant bias toward the majority class and
+poor generalization for the minority class.
+
+## 2. Maximize the balanced accuracy
+
+### a) Undersampling
+
+Reduces the number of observations in the majority class by randomly
+selecting a smaller subset, so it matches the size of the minority
+class.
+
+```{r}
+library(dplyr)
+
+# Count observations in each group
+table(train_data$Status)
+
+# Identify the smaller group size
+min_count <- min(table(train_data$Status))
+
+# Perform undersampling
+set.seed(12332281)  # For reproducibility
+train_data_undersampled <- train_data %>%
+  group_by(Status) %>%
+  sample_n(min_count) %>%
+  ungroup()
+
+# Check the new class balance
+table(train_data_undersampled$Status)
+```
+
+#### Apply lda()
+
+```{r}
+# Apply Linear Discriminant Analysis
+lda_model_undersampling <- lda(Status ~ ., data = train_data_undersampled)
+
+# Print LDA model details
+lda_model_undersampling
+```
+
+#### Compute the evaluation measures
+
+```{r}
+# Predict on the training data
+lda_predictions_undersampling <- predict(lda_model_undersampling, train_data_undersampled)$class
+
+# Create a confusion matrix
+confusion_matrix <- table(Predicted = lda_predictions_undersampling, Actual = train_data_undersampled$Status)
+print(confusion_matrix)
+
+# Calculate misclassification rate
+misclassified <- sum(confusion_matrix) - sum(diag(confusion_matrix))  # FP + FN
+total <- sum(confusion_matrix)  # FP + TN + FN + TP
+misclassification_rate <- misclassified / total
+cat("Misclassification Rate:", round(misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp <- confusion_matrix["FP", "FP"]
+true_positives_co <- confusion_matrix["CO", "CO"]
+actual_fp <- sum(confusion_matrix[, "FP"])
+actual_co <- sum(confusion_matrix[, "CO"])
+
+tpr_fp <- true_positives_fp / actual_fp  # TPR for FP
+tpr_co <- true_positives_co / actual_co  # TPR for CO
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp <- confusion_matrix["FP", "CO"]
+false_positives_co <- confusion_matrix["CO", "FP"]
+true_negatives_fp <- confusion_matrix["CO", "CO"]
+true_negatives_co <- confusion_matrix["FP", "FP"]
+
+tnr_fp <- true_negatives_fp / (true_negatives_fp + false_positives_co)  # TNR for FP
+tnr_co <- true_negatives_co / (true_negatives_co + false_positives_fp)  # TNR for CO
+
+# Compute balanced accuracy
+balanced_accuracy <- (tpr_fp + tnr_fp) / 2
+cat("Balanced Accuracy:", round(balanced_accuracy, 4), "\n")
+```
+
+#### Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions_undersampling <- predict(lda_model_undersampling, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions_undersampling, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+### b) Oversampling
+
+Increases the number of observations in the minority class by
+duplicating samples (with replacement), so it matches the size of the
+majority class.
+
+```{r}
+# Count observations in each group
+table(train_data$Status)
+
+# Identify the larger group size
+max_count <- max(table(train_data$Status))
+
+# Perform oversampling
+train_data_oversampling <- train_data %>%
+  group_by(Status) %>%
+  sample_n(max_count, replace = TRUE) %>%
+  ungroup()
+
+# Check the new class balance
+table(train_data_oversampling$Status)
+```
+
+#### Apply lda()
+
+```{r}
+# Apply Linear Discriminant Analysis
+lda_model_oversampling <- lda(Status ~ ., data = train_data_oversampling)
+
+# Print LDA model details
+lda_model_oversampling
+```
+
+#### Compute the evaluation measures
+
+```{r}
+# Predict on the training data
+lda_predictions_oversampling <- predict(lda_model_oversampling, train_data_oversampling)$class
+
+# Create a confusion matrix
+confusion_matrix <- table(Predicted = lda_predictions_oversampling, Actual = train_data_oversampling$Status)
+print(confusion_matrix)
+
+# Calculate misclassification rate
+misclassified <- sum(confusion_matrix) - sum(diag(confusion_matrix))  # FP + FN
+total <- sum(confusion_matrix)  # FP + TN + FN + TP
+misclassification_rate <- misclassified / total
+cat("Misclassification Rate:", round(misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp <- confusion_matrix["FP", "FP"]
+true_positives_co <- confusion_matrix["CO", "CO"]
+actual_fp <- sum(confusion_matrix[, "FP"])
+actual_co <- sum(confusion_matrix[, "CO"])
+
+tpr_fp <- true_positives_fp / actual_fp  # TPR for FP
+tpr_co <- true_positives_co / actual_co  # TPR for CO
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp <- confusion_matrix["FP", "CO"]
+false_positives_co <- confusion_matrix["CO", "FP"]
+true_negatives_fp <- confusion_matrix["CO", "CO"]
+true_negatives_co <- confusion_matrix["FP", "FP"]
+
+tnr_fp <- true_negatives_fp / (true_negatives_fp + false_positives_co)  # TNR for FP
+tnr_co <- true_negatives_co / (true_negatives_co + false_positives_fp)  # TNR for CO
+
+# Compute balanced accuracy
+balanced_accuracy <- (tpr_fp + tnr_fp) / 2
+cat("Balanced Accuracy:", round(balanced_accuracy, 4), "\n")
+```
+
+#### Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions_oversampling <- predict(lda_model_oversampling, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions_oversampling, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+**Training Data**
+
+| Metric                 | **Undersampling** | **Oversampling** | **Better Strategy** |
+|-------------------|------------------|------------------|------------------|
+| Misclassification Rate | 35.71%            | 37.09%           | **Undersampling**   |
+| Balanced Accuracy      | 67.27%            | 64.24%           | **Undersampling**   |
+
+-   **Undersampling:** Achieves a slightly better misclassification rate
+    and higher balanced accuracy on the training data.
+
+**Test Data**
+
+| Metric                 | **Undersampling** | **Oversampling** | **Better Strategy** |
+|-------------------|------------------|------------------|------------------|
+| Misclassification Rate | 37.33%            | 40.67%           | **Undersampling**   |
+| Balanced Accuracy      | 67.82%            | 61.86%           | **Undersampling**   |
+
+-   **Undersampling:** Performs better on test data, with both a lower
+    misclassification rate and higher balanced accuracy.
+
+**Undersampling is the more successful strategy.** It achieves better
+results on both the training and test datasets, with a higher balanced
+accuracy and a lower misclassification rate. While undersampling risks
+losing information from the majority class, it avoids overfitting,
+making it more effective for this dataset. Oversampling, on the other
+hand, struggles with overfitting due to repeated samples in the minority
+class, leading to poorer generalization on the test data.
+
+## 3. Quadratic Discrimant Analysis (QDA)
+
+Quadratic Discriminant Analysis (QDA) is a classification method that
+models each class with its own covariance matrix, allowing for more
+flexibility than LDA by capturing nonlinear decision boundaries.
+
+### a) Undersampling
+
+#### Apply qda()
+
+```{r}
+library(MASS)
+
+# Train QDA on the undersampled training data
+qda_model_undersampling <- qda(Status ~ ., data = train_data_undersampled)
+
+# Print QDA model details
+qda_model_undersampling
+```
+
+#### Compute the evaluation measures
+
+```{r}
+# Predict on the training data
+qda_predictions_undersampling <- predict(qda_model_undersampling, train_data_undersampled)$class
+
+# Create a confusion matrix
+confusion_matrix <- table(Predicted = qda_predictions_undersampling, Actual = train_data_undersampled$Status)
+print(confusion_matrix)
+
+# Calculate misclassification rate
+misclassified <- sum(confusion_matrix) - sum(diag(confusion_matrix))  # FP + FN
+total <- sum(confusion_matrix)  # FP + TN + FN + TP
+misclassification_rate <- misclassified / total
+cat("Misclassification Rate:", round(misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp <- confusion_matrix["FP", "FP"]
+true_positives_co <- confusion_matrix["CO", "CO"]
+actual_fp <- sum(confusion_matrix[, "FP"])
+actual_co <- sum(confusion_matrix[, "CO"])
+
+tpr_fp <- true_positives_fp / actual_fp  # TPR for FP
+tpr_co <- true_positives_co / actual_co  # TPR for CO
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp <- confusion_matrix["FP", "CO"]
+false_positives_co <- confusion_matrix["CO", "FP"]
+true_negatives_fp <- confusion_matrix["CO", "CO"]
+true_negatives_co <- confusion_matrix["FP", "FP"]
+
+tnr_fp <- true_negatives_fp / (true_negatives_fp + false_positives_co)  # TNR for FP
+tnr_co <- true_negatives_co / (true_negatives_co + false_positives_fp)  # TNR for CO
+
+# Compute balanced accuracy
+balanced_accuracy <- (tpr_fp + tnr_fp) / 2
+cat("Balanced Accuracy:", round(balanced_accuracy, 4), "\n")
+```
+
+#### Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions_undercampling <- predict(qda_model_undersampling, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions_undercampling, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+### b) Oversampling
+
+#### Apply qda()
+
+```{r}
+# Train QDA on the oversampling training data
+qda_model_oversampling <- qda(Status ~ ., data = train_data_oversampling)
+
+# Print QDA model details
+qda_model_oversampling
+```
+
+#### Compute the evaluation measures
+
+```{r}
+# Predict on the training data
+qda_predictions_oversampling <- predict(qda_model_oversampling, train_data_oversampling)$class
+
+# Create a confusion matrix
+confusion_matrix <- table(Predicted = qda_predictions_oversampling, Actual = train_data_oversampling$Status)
+print(confusion_matrix)
+
+# Calculate misclassification rate
+misclassified <- sum(confusion_matrix) - sum(diag(confusion_matrix))  # FP + FN
+total <- sum(confusion_matrix)  # FP + TN + FN + TP
+misclassification_rate <- misclassified / total
+cat("Misclassification Rate:", round(misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp <- confusion_matrix["FP", "FP"]
+true_positives_co <- confusion_matrix["CO", "CO"]
+actual_fp <- sum(confusion_matrix[, "FP"])
+actual_co <- sum(confusion_matrix[, "CO"])
+
+tpr_fp <- true_positives_fp / actual_fp  # TPR for FP
+tpr_co <- true_positives_co / actual_co  # TPR for CO
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp <- confusion_matrix["FP", "CO"]
+false_positives_co <- confusion_matrix["CO", "FP"]
+true_negatives_fp <- confusion_matrix["CO", "CO"]
+true_negatives_co <- confusion_matrix["FP", "FP"]
+
+tnr_fp <- true_negatives_fp / (true_negatives_fp + false_positives_co)  # TNR for FP
+tnr_co <- true_negatives_co / (true_negatives_co + false_positives_fp)  # TNR for CO
+
+# Compute balanced accuracy
+balanced_accuracy <- (tpr_fp + tnr_fp) / 2
+cat("Balanced Accuracy:", round(balanced_accuracy, 4), "\n")
+```
+
+#### Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions_oversampling <- predict(qda_model_oversampling, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions_oversampling, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+#### **Test Data**
+
+| Metric                 | **Undersampling** | **Oversampling** | **Better Strategy** |
+|-------------------|------------------|------------------|------------------|
+| Misclassification Rate | 41.67%            | **40.67%**       | **Oversampling**    |
+| Balanced Accuracy      | 67.29%            | **68.54%**       | **Oversampling**    |
+
+-   **Oversampling:** Performs slightly better on the test set, with a
+    lower misclassification rate and higher balanced accuracy. It
+    generalizes better than undersampling in this case.
+
+For QDA, **oversampling** performs slightly better than undersampling on
+the test set, achieving a lower misclassification rate (40.67% vs.
+41.67%) and a higher balanced accuracy (68.54% vs. 67.29%). This
+suggests that oversampling helps the model generalize better to unseen
+data by providing more examples of the minority class.
+
+## 4. Regularized Discrimant Analysis (RDA)
+
+Regularized Discriminant Analysis (RDA) is a classification method that
+combines Linear Discriminant Analysis (LDA) and Quadratic Discriminant
+Analysis (QDA) by introducing regularization parameters to balance
+between the two, improving flexibility and stability for datasets with
+multicollinearity or small sample sizes.
+
+### a) Undersampling
+
+#### Apply rda()
+
+```{r}
+library(klaR)
+
+# Train RDA on the undersampled training data
+rda_model_undersampling <- rda(Status ~ ., data = train_data_undersampled)
+
+rda_model_undersampling
+```
+
+#### Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions_undercampling <- predict(rda_model_undersampling, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions_undercampling, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+### b) Oversampling
+
+#### Apply rda()
+
+```{r}
+rda_model_oversampling <- rda(Status ~ ., data = train_data_oversampling)
+
+rda_model_oversampling
+```
+
+#### Predict for test data
+
+```{r}
+# Predict on the test data
+test_predictions_oversampling <- predict(rda_model_oversampling, test_data)$class
+
+# Create a confusion matrix
+test_confusion_matrix <- table(Predicted = test_predictions_oversampling, Actual = test_data$Status)
+print(test_confusion_matrix)
+
+# Calculate misclassification rate
+test_misclassification_rate <- (test_confusion_matrix["CO", "FP"] + test_confusion_matrix["FP", "CO"]) / sum(test_confusion_matrix)
+cat("Misclassification Rate (Test):", round(test_misclassification_rate, 4), "\n")
+
+# Compute TPR (True Positive Rate) for each class
+true_positives_fp_test <- test_confusion_matrix["FP", "FP"]
+true_positives_co_test <- test_confusion_matrix["CO", "CO"]
+actual_fp_test <- sum(test_confusion_matrix[, "FP"])
+actual_co_test <- sum(test_confusion_matrix[, "CO"])
+
+tpr_fp_test <- true_positives_fp_test / actual_fp_test
+tpr_co_test <- true_positives_co_test / actual_co_test
+
+# Compute TNR (True Negative Rate) for each class
+false_positives_fp_test <- test_confusion_matrix["FP", "CO"]
+false_positives_co_test <- test_confusion_matrix["CO", "FP"]
+tnr_co_test <- test_confusion_matrix["FP", "FP"] / (test_confusion_matrix["FP", "FP"] + false_positives_fp_test)
+tnr_fp_test <- test_confusion_matrix["CO", "CO"] / (test_confusion_matrix["CO", "CO"] + false_positives_co_test)
+
+# Compute balanced accuracy
+balanced_accuracy_test <- (tpr_co_test + tnr_co_test) / 2
+cat("Balanced Accuracy (Test):", round(balanced_accuracy_test, 4), "\n")
+```
+
+**Undersampling Results** - **Tuning Parameters (Gamma: 0.2258, Lambda:
+0.0773):**\
+- A **lower gamma** indicates that the model relies more on Quadratic
+Discriminant Analysis (QDA), allowing for non-linear decision
+boundaries.\
+- A **lower lambda** suggests that the covariance matrices for the
+classes are less regularized, meaning the model assumes more flexibility
+in the spread of the data.
+
+The model performs reasonably well, but the balanced accuracy suggests
+it struggles slightly with classifying both classes equally.
+
+**Oversampling Results** - **Tuning Parameters (Gamma: 0.4231, Lambda:
+0.9488):**\
+- A **higher gamma** indicates the model incorporates more Linear
+Discriminant Analysis (LDA), favoring linear decision boundaries.\
+- A **higher lambda** suggests strong regularization of the covariance
+matrices, making the model more stable and less sensitive to outliers or
+noise.
+
+The model achieves higher balanced accuracy but has a slightly higher
+misclassification rate.
+
+-   **Oversampling** is preferable due to its higher balanced accuracy,
+    which aligns with the goal of equal performance across both classes.
+    The high lambda ensures model stability, while gamma's balance
+    between LDA and QDA avoids overfitting to the minority class.

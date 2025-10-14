@@ -1,0 +1,391 @@
+---
+title: "Exercise 4"
+subtitle: "Advanced Methods for Regression and Classification"
+author: "Rita Selimi"
+date: "11/11/2024"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+# Set global options for all code chunks
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, tidy = TRUE)
+```
+
+## Load the necessary libraries
+
+```{r, include=FALSE}
+if (!requireNamespace("glmnet", quietly = TRUE)) {
+  install.packages("glmnet")
+}
+
+# Load the necessary libraries
+library(glmnet)
+```
+
+## Load Data
+
+```{r load-data}
+# Load the dataset
+load("building.RData")
+# str(df)
+```
+
+## Data Splitting
+
+```{r data-splitting}
+set.seed(12332281)
+
+# Split the data
+sample_index <- sample(1:nrow(df), size = 2/3 * nrow(df))
+train_data <- df[sample_index, ]
+test_data <- df[-sample_index, ]
+```
+### Fit regression model on the training data
+
+```{r model-fitting}
+# Fit linear regression model
+model <- lm(y ~ ., data = train_data)
+# summary(model)
+```
+
+### Compute RMSE (training data)
+
+```{r predictions}
+train_pred <- predict(model, newdata = train_data)
+
+# Compute RMSE for training data
+train_rmse <- sqrt(mean((train_data$y - train_pred)^2))
+cat("Training RMSE:", train_rmse, "\n")
+```
+
+## 1. Ridge Regression
+
+### a) Fit Ridge Regression Model
+
+### Prepare the data
+```{r}
+# Prepare the predictor and response matrices for the training data
+x_train <- as.matrix(train_data[, -1])  
+y_train <- train_data$y
+
+# Prepare test data matrices
+x_test <- as.matrix(test_data[, -1])
+y_test <- test_data$y
+```
+
+### Fit Ridge Regression Model
+```{r ridge-fitting}
+# Fit Ridge Regression model
+ridge_model <- glmnet(x_train, y_train, alpha = 0)
+
+# Plot the ridge model to visualize the coefficient paths
+plot(ridge_model, xvar = "lambda", label = TRUE, main = "Ridge Regression Coefficient Paths")
+```
+**How can you interpret the plot?**
+
+The plot displays how the coefficients for each predictor change as `lambda` increases. As `lambda` increases, coefficients shrink towards zero, which helps control overfitting by reducing the impact of multicollinearity. Each line represents a different predictor's coefficient.
+
+With low `lambda` (left side), coefficients are larger, meaning the model fits more closely to the data. As `lambda` increases, less important predictors shrink faster, while important ones hold their influence longer. Eventually, at very high `lambda` values, all coefficients get close to zero, which can lead to underfitting.
+
+**Which default parameters are used for lambda?**
+
+In this function, the default `lambda` sequence is automatically generated based on the data. This sequence typically starts from a maximum value, which is high enough to shrink all coefficients to nearly zero, and then decreases logarithmically to a minimum fraction of the maximum. The plot shows this progression, with `Log Lambda` on the x-axis. As `lambda` increases, the regularization effect strengthens, and the coefficients shrink toward zero. 
+
+**What is the meaning of the parameter alpha?**
+
+The `alpha` parameter controls the type of regularization:
+- `alpha = 0`: Ridge Regression (L2 penalty) shrinks coefficients but keeps all of them, useful for handling multicollinearity.
+
+### b) Cross-Validation for Optimal Lambda
+
+```{r ridge-cv}
+# Perform cross-validation with Ridge Regression (alpha = 0)
+ridge_cv <- cv.glmnet(x_train, y_train, alpha = 0)
+
+# Plot the cross-validation results
+plot(ridge_cv, main = "Cross-Validation for Ridge Regression")
+
+# Print the optimal lambda values
+cat("Lambda with minimum MSE:", ridge_cv$lambda.min, "\n")
+cat("Lambda with 1-SE rule:", ridge_cv$lambda.1se, "\n")
+
+cat("Log Lambda with minimum MSE:", log(ridge_cv$lambda.min), "\n")
+cat("Log Lambda with 1-SE rule:", log(ridge_cv$lambda.1se), "\n")
+```
+The plot shows the mean squared error (MSE) for each value of `lambda` used during cross-validation. Dashed lines on the plot indicate `lambda.min` and `lambda.1se`, helping identify the best `lambda` values for balancing model performance.
+1. **`lambda.min`**: This is the `lambda` value that achieves the minimum cross-validated MSE. This `lambda` results in the best predictive accuracy among all tested values.
+2. **`lambda.1se`**: This is the largest `lambda` within one standard error of the minimum MSE. Using this value often leads to a simpler model with slightly more regularization, reducing overfitting risk.
+
+The vertical error bars show the standard error of the MSE across cross-validation folds for each lambda value. Shorter error bars indicate more consistent MSE values across folds, while longer bars suggest greater variability.
+
+The plot shows that as lambda decreases, the regularization effect weakens, and the MSE decreases to reach its minimum around lambda.min. 
+The optimal tuning parameters from the cross-validation results are: the **`lambda.min`** value is 0.07141336 and the **`lambda.1se`** value is 0.1810589
+
+```{r}
+# Obtain coefficients for the model using lambda.min
+coef_min <- coef(ridge_cv, s = "lambda.min")
+# Obtain coefficients for the model using lambda.1se
+coef_1se <- coef(ridge_cv, s = "lambda.1se")
+
+# Convert the sparse matrix to a data frame
+coef_min_df <- as.data.frame(as.matrix(coef_min))
+coef_1se_df <- as.data.frame(as.matrix(coef_1se))
+print(coef_min_df)
+print(coef_1se_df)
+```
+
+The Ridge Regression output shows the coefficients in a matrix format. Each row represents a predictor and shows its estimated effect on the response variable.
+
+In this case, the matrix includes coefficients for 108 predictors. Most of these values are very small, which is expected in Ridge Regression, as it shrinks the impact of predictors with weaker relationships to the response. This shrinkage helps prevent overfitting by reducing the influence of less important predictors, while still keeping all predictors in the model.
+
+## c) Predicting on Test Data
+
+```{r predict-test}
+# Predict using lambda.min - the optimal model
+pred_min <- predict(ridge_cv, s = "lambda.min", newx = x_test)
+
+# RMSE for lambda.min
+rmse_min <- sqrt(mean((y_test - pred_min)^2))
+cat("RMSE with lambda.min:", rmse_min, "\n")
+
+# Predict using lambda.1se
+pred_1se <- predict(ridge_cv, s = "lambda.1se", newx = x_test)
+
+# RMSE for lambda.1se
+rmse_1se <- sqrt(mean((y_test - pred_1se)^2))
+cat("RMSE with lambda.1se:", rmse_1se, "\n")
+```
+### Visualize Predictions vs. Actual Values
+
+```{r plot-lambda-min}
+plot(y_test, pred_min, 
+     main = "Predictions vs. Actual Values (lambda.min)",
+     xlab = "Actual Values", 
+     ylab = "Predicted Values",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)
+
+plot(y_test, pred_1se, 
+     main = "Predictions vs. Actual Values (lambda.1se)",
+     xlab = "Actual Values", 
+     ylab = "Predicted Values",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)
+```
+- **RMSE Values**:
+  - **RMSE with `lambda.min`**: `0.2328241`
+  - **RMSE with `lambda.1se`**: `0.2472471`
+  
+The RMSE for `lambda.min` is slightly lower than for `lambda.1se`, which is expected since `lambda.min` minimizes the prediction error, thus we consider it as the optimal model. However, the difference is small, indicating that both models are performing similarly.
+
+The scatter plots show a good alignment of predicted values with actual values, as most points lie near the 45-degree line. This suggests that the model is reasonably accurate in predicting the response variable.
+
+In comparing the RMSE values from your current Ridge model with the results from previous exercises, we see improvements. The RMSE values with `lambda.min` in this model are 0.2284 and 0.2328, both lower than the test RMSEs from Exercises 2 and 3, which were approximately 0.7586 for a linear model in Exercise 2 and 0.2872 in Principal Component Regression (PCR) and 0.299 in Partial Least Squares (PLS) from Exercise 3. 
+
+## 2. Lasso Regression:
+
+## 1. Fit Lasso Regression Model with `glmnet()`
+
+```{r lasso-fitting}
+# Fit Lasso Regression model (alpha = 1 by default for Lasso)
+lasso_model <- glmnet(x_train, y_train, alpha = 1)
+
+# Plot Lasso model to visualize coefficient paths
+plot(lasso_model, xvar = "lambda", main = "Lasso Regression Coefficient Paths")
+```
+**How can you interpret the plot?**
+
+The Lasso Regression coefficient path plot shows how each predictor's coefficient changes as `lambda` varies. On the x-axis, larger values of `lambda` apply stronger regularization, which shrinks more coefficients toward zero. Lasso’s can set some coefficients exactly to zero, effectively removing those predictors from the model. In the plot, some lines flatten out at zero as lambda increases, this demonstrated Lasso’s ability to select only the most important predictors. 
+
+**Which default parameters are used for lambda?**
+
+In this function, the default `lambda` sequence is automatically generated based on the data. This sequence typically starts from a high value, which is high enough to shrink coefficients to zero, and then decreases to a low value. The plot shows this progression, with `Log Lambda` on the x-axis. As `lambda` increases, the regularization effect strengthens.
+
+**What is the meaning of the parameter alpha?**
+
+The `alpha` parameter controls the type of regularization:
+- `alpha = 1`: Lasso Regression (L1 penalty) can shrink some coefficients to zero, effectively selecting variables.
+
+## b) Cross-Validation for Optimal Lambda
+
+```{r lasso-cv}
+# Perform cross-validation to find optimal lambda for Lasso
+lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1)
+
+# Plot cross-validated MSE for different lambda values
+plot(lasso_cv, main = "Cross-Validation for Lasso Regression")
+
+# Print the optimal lambda values
+cat("Lambda with minimum MSE:", lasso_cv$lambda.min, "\n")
+cat("Lambda with 1-SE rule:", lasso_cv$lambda.1se, "\n")
+
+cat("Log Lambda with minimum MSE:", log(lasso_cv$lambda.min), "\n")
+cat("Log Lambda with 1-SE rule:", log(lasso_cv$lambda.1se), "\n")
+```
+This plot shows the cross-validation results for Lasso Regression, it illustrates how the mean squared error (MSE) changes across different values of the regularization parameter lambda. The plot shows that as lambda decreases, the regularization effect weakens, and the MSE initially decreases to reach its minimum around lambda.min.
+After reaching lambda.min, the MSE starts to increase as lambda continues to decrease, indicating that the model might be overfitting with less regularization.
+The optimal tuning parameters from the cross-validation results are: the **`lambda.min`** value is 0.00355426 and the **`lambda.1se`** value is 0.007481376.
+
+### Obtain Coefficients at Optimal Lambda
+
+```{r lasso-coefficients}
+# Extract coefficients for lambda.min and lambda.1se
+coef_lasso_min <- coef(lasso_cv, s = "lambda.min")
+coef_lasso_1se <- coef(lasso_cv, s = "lambda.1se")
+
+# Convert sparse matrices to data frames for easier viewing
+coef_lasso_min_df <- as.data.frame(as.matrix(coef_lasso_min))
+coef_lasso_1se_df <- as.data.frame(as.matrix(coef_lasso_1se))
+
+# Display coefficients
+print(coef_lasso_min_df)
+print(coef_lasso_1se_df)
+```
+The Lasso Regression model at `lambda.min` and `lambda.1se` shows its ability to select important variables by setting some coefficients to zero. Predictors like `START.YEAR`, `START.QUARTER`, `PhysFin2`, and `PhysFin3` have zero coefficients, meaning they’re excluded from the model. Meanwhile, predictors such as `COMPLETION.YEAR` and `PhysFin1` have non-zero coefficients, indicating stronger relationships with the response. This variable selection simplifies the model, focusing on the most relevant predictors and reducing complexity.
+
+## c) Predict on Test Data and Calculate RMSE
+
+```{r lasso-predict-rmse}
+# Predict using lambda.min and lambda.1se
+pred_lasso_min <- predict(lasso_cv, s = "lambda.min", newx = x_test)
+
+# Calculate RMSE for both lambda.min and lambda.1se
+rmse_lasso_min <- sqrt(mean((y_test - pred_lasso_min)^2))
+cat("RMSE with lambda.min:", rmse_lasso_min, "\n")
+
+pred_lasso_1se <- predict(lasso_cv, s = "lambda.1se", newx = x_test)
+rmse_lasso_1se <- sqrt(mean((y_test - pred_lasso_1se)^2))
+cat("RMSE with lambda.1se:", rmse_lasso_1se, "\n")
+```
+### Visualize Predictions vs. Actual Values
+
+```{r plot-lasso-min}
+plot(y_test, pred_lasso_min, 
+     main = "Predictions vs. Actual Values (Lasso, lambda.min)",
+     xlab = "Actual Values", 
+     ylab = "Predicted Values",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)
+
+plot(y_test, pred_lasso_1se, 
+     main = "Predictions vs. Actual Values (Lasso, lambda.1se)",
+     xlab = "Actual Values", 
+     ylab = "Predicted Values",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)
+```
+- **RMSE Values**:
+  - **RMSE with `lambda.min`**: `0.2261585`
+  - **RMSE with `lambda.1se`**: `0.2474538`
+
+The RMSE for `lambda.min` is actually slightly lower than for `lambda.1se`, suggesting that the model `lambda.min` is bit better in prediction accuracy for this dataset. However, the difference in RMSE between the two is very small, indicating that both models perform similarly well.
+
+The scatter plot shows a good alignment of predicted values with actual values, with most points lying close to the 45-degree line. This close alignment suggests that the model is effectively capturing the relationship between the predictors and the response variable.
+
+In comparing the RMSE values from your current Lasso regression model with the results from previous exercises, we see improvements. The RMSE values with `lambda.1se` in this model are 0.2284 and 0.2253, both lower than the test RMSEs from Exercises 2 and 3, which were approximately 0.7586 for a linear model in Exercise 2 and 0.2872 in Principal Component Regression (PCR) and 0.299 in Partial Least Squares (PLS) from Exercise 3. 
+
+## 1. Adaptive Lasso Regression:
+
+### a) Obtain Ridge Regression Coefficients as Weights
+
+```{r ridge-coefficients}
+# Extract Ridge coefficients for a selected lambda (lambda.min from cross-validation)
+ridge_coef <- coef(ridge_cv, s = "lambda.min")
+
+# Compute weights for Adaptive Lasso 
+ridge_weights <- 1 / abs(ridge_coef[-1])
+ridge_weights[is.infinite(ridge_weights)] <- 0  # replaces infinite weights with zero
+```
+
+### Fit Adaptive Lasso Regression Model
+
+```{r adaptive-lasso}
+# Fit Adaptive Lasso model using the Ridge weights
+adaptive_lasso_model <- glmnet(x_train, y_train, alpha = 1, penalty.factor = ridge_weights)
+
+# Plot the Adaptive Lasso model to visualize coefficient paths
+plot(adaptive_lasso_model, xvar = "lambda", main = "Adaptive Lasso Regression Coefficient Paths")
+```
+**How can you interpret the plot?**
+
+This plot shows how the coefficients for each predictor change as the regularization parameter `lambda` varies in Adaptive Lasso Regression. On the x-axis, the higher values (right side) apply strong regularization, pushing most coefficients close to zero, while lower values (left side) reduce the regularization effect. Each colored line represents a predictor's coefficient path, with some lines staying close to zero across all `lambda` values which indicates that those predictors have been heavily penalized and are less important to the model. Because Adaptive Lasso uses weights based on Ridge regression, predictors identified as more significant in Ridge face less penalization, so their lines move away from zero earlier. 
+
+**Which default parameters are used for lambda?**
+
+`lambda` generates a sequence of values that range from strong to weak regularization. This sequence starts with a large `lambda` value, which applies strong regularization and shrinks most coefficients close to zero. It then gradually decreases to a much smaller `lambda` value, allowing the model to apply less regularization. 
+
+**What is the meaning of the parameter alpha?**
+
+Setting alpha = 1 tells glmnet to perform Lasso Regression, which applies an L1 penalty. Penalty.factor allows us to apply a different penalty to each predictor based on the ridge_weights vector. `ridge_weights` contains weights based on the Ridge coefficients, where each weight is the inverse of the absolute Ridge coefficient for each predictor.
+Predictors with smaller Ridge coefficients get larger weights in the Adaptive Lasso model, increasing their penalty and making them more likely to be shrunk to zero. Predictors with larger Ridge coefficients get smaller weights, reducing their penalty, so they’re more likely to stay in the model.
+
+### b) Cross-Validation to Find Optimal Lambda
+
+```{r adaptive-lasso-cv}
+# Perform cross-validation for Adaptive Lasso
+adaptive_lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, penalty.factor = ridge_weights)
+
+# Plot cross-validation results
+plot(adaptive_lasso_cv, main = "Cross-Validation for Adaptive Lasso Regression")
+
+cat("Log Lambda with minimum MSE:", log(adaptive_lasso_cv$lambda.min), "\n")
+cat("Log Lambda with 1-SE rule:", log(adaptive_lasso_cv$lambda.1se), "\n")
+```
+This plot shows the cross-validated mean-squared error (MSE) for different values of `log(lambda)` in Adaptive Lasso Regression. The red dots represent the MSE for each lambda, while the error bars indicate the variability of the MSE across the cross-validation folds. The two vertical dashed lines correspond to the optimal lambda values: `lambda.min`, which are 2.387169 for `lambda.min` and 3.224473 for `lambda.1se`.
+
+#### Extract Coefficients at Optimal Lambda
+
+```{r adaptive-lasso-coefficients}
+# Obtain coefficients for lambda.min and lambda.1se
+coef_adaptive_lasso_min <- coef(adaptive_lasso_cv, s = "lambda.min")
+coef_adaptive_lasso_1se <- coef(adaptive_lasso_cv, s = "lambda.1se")
+
+# Convert sparse matrices to data frames for easier viewing
+coef_adaptive_lasso_min_df <- as.data.frame(as.matrix(coef_adaptive_lasso_min))
+coef_adaptive_lasso_1se_df <- as.data.frame(as.matrix(coef_adaptive_lasso_1se))
+
+# Display coefficients
+print(coef_adaptive_lasso_min_df)
+print(coef_adaptive_lasso_1se_df)
+```
+
+#### Predict on Test Data and Calculate RMSE
+
+```{r adaptive-lasso-predict-rmse}
+# Predict using lambda.min and lambda.1se
+pred_adaptive_lasso_min <- predict(adaptive_lasso_cv, s = "lambda.min", newx = x_test)
+pred_adaptive_lasso_1se <- predict(adaptive_lasso_cv, s = "lambda.1se", newx = x_test)
+
+# Calculate RMSE for both lambda.min and lambda.1se
+rmse_adaptive_lasso_min <- sqrt(mean((y_test - pred_adaptive_lasso_min)^2))
+rmse_adaptive_lasso_1se <- sqrt(mean((y_test - pred_adaptive_lasso_1se)^2))
+
+cat("RMSE with lambda.min:", rmse_adaptive_lasso_min, "\n")
+cat("RMSE with lambda.1se:", rmse_adaptive_lasso_1se, "\n")
+```
+The Adaptive Lasso model has selected a few key predictors with non-zero coefficients, showing their importance in explaining the response variable. These include variables like `START.YEAR`, `COMPLETION.YEAR`, `PhysFin1`, and `Econ4`. Many other predictors have been set to zero, meaning they have little or no impact on the response. Adaptive Lasso has created a simpler model that focuses on the most influential variables.
+
+### c) Visualize Predictions vs. Actual Values
+
+```{r plot-adaptive-lasso-min}
+plot(y_test, pred_adaptive_lasso_min, 
+     main = "Predictions vs. Actual Values (Adaptive Lasso, lambda.min)",
+     xlab = "Actual Values", 
+     ylab = "Predicted Values",
+     pch = 16, col = "lightblue")
+abline(0, 1, col = "red", lwd = 2)
+
+plot(y_test, pred_adaptive_lasso_1se, 
+     main = "Predictions vs. Actual Values (Adaptive Lasso, lambda.1se)",
+     xlab = "Actual Values", 
+     ylab = "Predicted Values",
+     pch = 16, col = "lightgreen")
+abline(0, 1, col = "red", lwd = 2)
+```
+- **RMSE Values**:
+  - **RMSE with `lambda.min`**: `0.2341446`
+  - **RMSE with `lambda.1se`**: `0.2470526`
+
+The RMSE for `lambda.min` is again slightly lower than for `lambda.1se`, but both models perform similarly well. The scatter plot shows a good alignment of predicted values with actual values, with most points lying close to the 45-degree line. 
