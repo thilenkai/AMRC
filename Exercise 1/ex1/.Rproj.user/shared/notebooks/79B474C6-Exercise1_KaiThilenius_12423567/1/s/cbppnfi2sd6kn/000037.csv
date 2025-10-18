@@ -1,7 +1,0 @@
-"0","par(mfrow = c(1, 2))"
-"0",""
-"0","# Original model"
-"0","plot(College$Expend, College$Outstate,"
-"0","     main = ""Original Data"","
-"0","     xlab = ""Expend"", ylab = ""Outstate"","
-"0","     pch = 19, col = ""gray"")"

@@ -1,4 +1,0 @@
-"0","eigen.pearson <- eigen(cor.pearson)"
-"0","eigen.kendall <- eigen(cor.kendall)"
-"0","plot(eigen.pearson$values,eigen.kendall$values,"
-"0","     xlab=""Eigenvalues from Pearson"",ylab=""Eigenvalues from Kendall"")"

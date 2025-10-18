@@ -1,6 +1,0 @@
-"0",""
-"0","# After removing high outliers"
-"0","plot(College_no_outliers$Expend, College_no_outliers$Outstate,"
-"0","     main = ""After Removing Upper Outliers"","
-"0","     xlab = ""Expend"", ylab = ""Outstate"","
-"0","     pch = 19, col = ""gray"")"

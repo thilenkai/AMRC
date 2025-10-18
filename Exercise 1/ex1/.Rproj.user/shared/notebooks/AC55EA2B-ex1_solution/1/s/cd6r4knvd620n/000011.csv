@@ -1,4 +1,0 @@
-"0","data(Auto,package=""ISLR"")"
-"2","Fehler in find.package(package, lib.loc, verbose = verbose) : 
-  es gibt kein Paket namens ‘ISLR’
-"

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2025.10.13)  14 OCT 2025 19:09
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2025.10.13)  15 OCT 2025 21:42
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -434,7 +434,7 @@ File: ts1lmr.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 <Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-3-1.pdf, id=34, 469.755pt x 325.215pt>
 File: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-3-1.pdf Graphic file (type pdf)
 <use Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-3-1.pdf>
-Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-3-1.pdf  used on input line 221.
+Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-3-1.pdf  used on input line 222.
 (pdftex.def)             Requested size: 469.75386pt x 325.2142pt.
 
 
@@ -442,18 +442,18 @@ Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unna
 <Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-5-1.pdf, id=45, 469.755pt x 325.215pt>
 File: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-5-1.pdf Graphic file (type pdf)
 <use Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-5-1.pdf>
-Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-5-1.pdf  used on input line 261.
+Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-5-1.pdf  used on input line 263.
 (pdftex.def)             Requested size: 469.75386pt x 325.2142pt.
 
 LaTeX Font Warning: Font shape `T1/lmtt/bx/it' in size <10> not available
-(Font)              Font shape `T1/lmtt/b/sl' tried instead on input line 267.
+(Font)              Font shape `T1/lmtt/b/sl' tried instead on input line 269.
 
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <10> on input line 278.
+(Font)              <10> on input line 280.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <7> on input line 278.
+(Font)              <7> on input line 280.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <5> on input line 278.
+(Font)              <5> on input line 280.
 
 LaTeX Warning: `!h' float specifier changed to `!ht'.
 
@@ -461,25 +461,47 @@ LaTeX Warning: `!h' float specifier changed to `!ht'.
 
 [4 <./Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-5-1.pdf>]
 
-[5{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc}{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-rm.enc}{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-mathsy.enc}] (./Exercise1_KaiThilenius_12423567.aux)
+[5{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc}{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-rm.enc}{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-mathsy.enc}]
+
+[6]
+<Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-8-1.pdf, id=75, 469.755pt x 325.215pt>
+File: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-8-1.pdf Graphic file (type pdf)
+<use Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-8-1.pdf>
+Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-8-1.pdf  used on input line 437.
+(pdftex.def)             Requested size: 469.75386pt x 325.2142pt.
+
+
+[7 <./Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-8-1.pdf>]
+
+[8{c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc}]
+<Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-11-1.pdf, id=94, 469.755pt x 325.215pt>
+File: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-11-1.pdf Graphic file (type pdf)
+<use Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-11-1.pdf>
+Package pdftex.def Info: Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-11-1.pdf  used on input line 564.
+(pdftex.def)             Requested size: 469.75386pt x 325.2142pt.
+
+
+[9]
+
+[10 <./Exercise1_KaiThilenius_12423567_files/figure-latex/unnamed-chunk-11-1.pdf>] (./Exercise1_KaiThilenius_12423567.aux)
  ***********
 LaTeX2e <2025-06-01> patch level 1
 L3 programming layer <2025-09-02>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 11580 strings out of 469729
- 180500 string characters out of 5475116
- 599762 words of memory out of 5000000
- 39831 multiletter control sequences out of 15000+600000
- 677947 words of font info for 84 fonts, out of 8000000 for 9000
+ 11630 strings out of 469729
+ 182265 string characters out of 5475116
+ 600433 words of memory out of 5000000
+ 39865 multiletter control sequences out of 15000+600000
+ 683920 words of font info for 86 fonts, out of 8000000 for 9000
  14 hyphenation exceptions out of 8191
- 89i,10n,93p,851b,481s stack positions out of 10000i,1000n,20000p,200000b,200000s
-<c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmbx10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmbx12.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmbxi10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmmi10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr12.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr17.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr7.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmri10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmsy10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmsy7.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtk10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtko10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtt10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtti10.pfb>
-Output written on Exercise1_KaiThilenius_12423567.pdf (5 pages, 457426 bytes).
+ 89i,10n,93p,883b,623s stack positions out of 10000i,1000n,20000p,200000b,200000s
+<c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmbx10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmbx12.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmbxi10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmex10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmmi10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmmi7.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr12.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr17.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmr7.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmri10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmsy10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmsy7.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtk10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtko10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtt10.pfb><c:/Users/kaith/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/lm/lmtti10.pfb>
+Output written on Exercise1_KaiThilenius_12423567.pdf (10 pages, 743447 bytes).
 PDF statistics:
- 153 PDF objects out of 1000 (max. 8388607)
- 106 compressed objects within 2 object streams
- 10 named destinations out of 1000 (max. 500000)
- 40 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 229 PDF objects out of 1000 (max. 8388607)
+ 169 compressed objects within 2 object streams
+ 23 named destinations out of 1000 (max. 500000)
+ 106 words of extra memory for PDF output out of 10000 (max. 10000000)
 
