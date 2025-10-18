@@ -1,0 +1,44 @@
+---
+title: "Exercise2_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "18.10.2025"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. Load provided Data
+
+it contains information about construction costs (df\$y) of real estate single-family residential apartments in Tehran, Iran. This is the response variable for our tasks, and the explanatory variables are all remaining variables, which are project variables, physical and financial variables, and 19 economic variables, each with additional 4 time lags. Note that the response variable has already been log-transformed. In this exercise we are thus **not depending on any pre-processing** of the data.
+
+Though we can already split the data randomly into `train` and `test` data
+
+```{r, echo=TRUE}
+ load("building.RData")
+```
+
+## 1. Compute the full model
+
+### a) Plot result object
+
+### b) Estimated regression coefficients
+
+### c) RMSE for test and train
+
+### d) Response values vs. fitted/predicted values for training
+
+## 2. Variable selection besed on stepwise regression
+
+### a) forward selection
+
+### b) backward selection
+
+## 3) Preferred model - ANOVA
+
+## 4) Comparison of the models with `cvFit()`
+
+## 5) Comparison of the models with `cost=rtmspe`
+
+WHAT AM I DOING?
