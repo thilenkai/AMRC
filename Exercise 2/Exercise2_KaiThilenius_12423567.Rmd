@@ -1,7 +1,7 @@
 ---
 title: "Exercise2_KaiThilenius_12423567"
 author: "Kai Thilenius"
-date: "18.10.2025"
+date: "22.10.2025"
 output: pdf_document
 ---
 
@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## 0. Load provided Data
 
-it contains information about construction costs (df\$y) of real estate single-family residential apartments in Tehran, Iran. This is the response variable for our tasks, and the explanatory variables are all remaining variables, which are project variables, physical and financial variables, and 19 economic variables, each with additional 4 time lags. Note that the response variable has already been log-transformed. In this exercise we are thus **not depending on any pre-processing** of the data.
+Data contains information about construction costs (df\$y) of real estate single-family residential apartments in Tehran, Iran. This is the response variable for our tasks, and the explanatory variables are all remaining variables, which are project variables, physical and financial variables, and 19 economic variables, each with additional 4 time lags. Note that the response variable has already been log-transformed. In this exercise we are thus **not depending on any pre-processing** of the data.
 
 Though we can already split the data randomly into `train` and `test` data
 
@@ -19,26 +19,229 @@ Though we can already split the data randomly into `train` and `test` data
  load("building.RData")
 ```
 
+```{r, echo=TRUE}
+set.seed(69)
+ n <- nrow(df)
+ train <- sample(1:n, size = round(2/3 * n))
+ test <- (1:n)[-train]
+```
+
 ## 1. Compute the full model
+
+```{r, echo=TRUE}
+ m1<- lm(y~., data = df, subset = train)
+ m1_pred_test <- predict(m1, newdata = df[test,])
+
+```
+
+Puts out warning: Warning in predict.lm(m1, newdata = df[test, ]) :prediction from rank-deficient fit; attr(\*, "non-estim") has doubtful cases
 
 ### a) Plot result object
 
+```{r, echo=TRUE}
+par(mfrow = c(2, 2), cex = 1, mar = c(4, 4, 2, 2))
+ plot(m1)
+```
+
+Residuals vs. Fitted spread fairly even, light tilt though on the right side. Q-Q Residuals look especially alligned
+
 ### b) Estimated regression coefficients
+
+```{r, echo=TRUE}
+ coef(m1)
+```
+
+Some NAs exist indeed.
 
 ### c) RMSE for test and train
 
+```{r, echo=TRUE}
+m1_pred_train <- predict(m1, newdata = df[train, ])
+m1_pred_test <- predict(m1, newdata = df[test, ])
+
+rmse_train <- sqrt(mean((df[train, "y"] - m1_pred_train)^2))
+rmse_test <- sqrt(mean((df[test, "y"] - m1_pred_test)^2))
+
+cat('RMSE of training set:', rmse_train, '\n')
+cat('RMSE of test set:', rmse_test, '\n')
+
+```
+
+We definetely see overfitting of towards the train-data here :(
+
 ### d) Response values vs. fitted/predicted values for training
+
+```{r, echo=TRUE}
+ par(mfrow=c(2,1),cex=0.7,mar=c(4,4,2,2))
+ plot(m1_pred_train,df[train,'y'],ylab='Observed',xlab='Predicted',
+ main = 'TrainData')
+ abline(0,1,lty=2,col='red')
+ plot(m1_pred_test,df[test,'y'],ylab='Observed',xlab='Predicted',
+ main = 'TestData')
+ abline(0,1,lty=2,col='red')
+```
+
+The overfitting towards the train-date is also shown in these graphs here.
 
 ## 2. Variable selection besed on stepwise regression
 
+Different variable selections applied:
+
 ### a) forward selection
+
+```{r, echo=TRUE}
+ m0<- lm(y~1, data = df, subset = train)
+ m_fs<- step(m0, scope = list(lower = formula(m0), upper = formula(m1)),
+ direction = "forward", trace = 0)
+ summary(m_fs)
+```
 
 ### b) backward selection
 
+```{r, echo=TRUE}
+ m_bs<- step(m1, direction = "backward", trace = 0)
+ summary(m_bs)
+```
+
+Took quite some time to calculate.
+
+### c) RMSE Comparison of both selections
+
+```{r, echo=TRUE}
+pred_test_fs <- predict(m_fs, newdata = df[test,])
+ pred_test_bs <- predict(m_bs, newdata = df[test,])
+ rmse_test_fs <- sqrt(mean((df[test,"y"]- pred_test_fs)^2))
+ rmse_test_bs <- sqrt(mean((df[test,"y"]- pred_test_bs)^2))
+ cat("RMSE test (forward):", rmse_test_fs, "\n")
+ cat("RMSEtest(backward):",rmse_test_bs)
+```
+
+Forward better whoop whoop
+
+### d) Plot comparison
+
+```{r, echo=TRUE}
+ par(mfrow=c(2,1),cex=0.7,mar=c(4,4,2,2))
+ plot(pred_test_fs,df[test,'y'],ylab='Observed',xlab='Predicted',
+ main = 'ForwardSelectionModel')
+ abline(0,1,lty=2,col='red')
+ plot(pred_test_bs,df[test,'y'],ylab='Observed',xlab='Predicted',
+ main = 'BackwardSelectionModel')
+ abline(0,1,lty=2,col='red')
+```
+
 ## 3) Preferred model - ANOVA
+
+```{r, echo=TRUE}
+anova(m_fs, m1)
+anova(m_bs, m1)
+```
+
+The analysis of variance (ANOVA) states that both selective models have p-values above 0.05, especially the backward with (p = 0.799). This means the full model does not significantly improve the fit compared to either fs or bs. So simpler models are preferred. The forward selection model (p = 0.0748) is slightly closer to significance and might be a good compromise between simplicity and fit.
 
 ## 4) Comparison of the models with `cvFit()`
 
+```{r, echo=TRUE}
+library(cvTools)
+
+suppressWarnings({
+  cv_m1_train <- cvFit(m1, y = df[train, "y"], data = df[train, ],
+                       cost = rmspe, K = 5, R = 100)
+  cv_m1_test <- cvFit(m1, y = df[test, "y"], data = df[test, ],
+                      cost = rmspe, K = 5, R = 100)
+  
+  cv_fs_train <- cvFit(m_fs, y = df[train, "y"], data = df[train, ],
+                       cost = rmspe, K = 5, R = 100)
+  cv_fs_test <- cvFit(m_fs, y = df[test, "y"], data = df[test, ],
+                      cost = rmspe, K = 5, R = 100)
+  
+  cv_bs_train <- cvFit(m_bs, y = df[train, "y"], data = df[train, ],
+                       cost = rmspe, K = 5, R = 100)
+  cv_bs_test <- cvFit(m_bs, y = df[test, "y"], data = df[test, ],
+                      cost = rmspe, K = 5, R = 100)
+})
+```
+
+cvFit() from cvTools might be outdated :/
+
+```{r, echo=TRUE}
+par(cex = 1)
+
+boxplot(list(
+  Full_Train    = cv_m1_train$reps, 
+  Full_Test     = cv_m1_test$reps,
+  Forward_Train = cv_fs_train$reps, 
+  Forward_Test  = cv_fs_test$reps,
+  Backward_Train= cv_bs_train$reps, 
+  Backward_Test = cv_bs_test$reps
+),
+ylab = "RMSE",
+main = "5-fold CV (100 reps)")
+```
+
+```{r, echo=TRUE}
+boxplot(list(
+  Full_Train     = cv_m1_train$reps, 
+  Full_Test      = cv_m1_test$reps,
+  Forward_Train  = cv_fs_train$reps, 
+  Forward_Test   = cv_fs_test$reps,
+  Backward_Train = cv_bs_train$reps, 
+  Backward_Test  = cv_bs_test$reps
+),
+ylab = "RMSE",
+main = "5-fold CV (100 reps)",
+ylim = c(0, 40),
+col = "lightblue",
+las = 2)
+
+```
+
 ## 5) Comparison of the models with `cost=rtmspe`
 
-WHAT AM I DOING?
+```{r, echo=TRUE}
+library(cvTools)
+
+# Optional: adjust plot parameters
+par(cex.axis = 0.8, las = 2, mar = c(8, 5, 4, 2) + 0.1)
+
+# 5-fold CV with 100 repetitions using rtmspe
+suppressWarnings({
+  cv_m1_train  <- cvFit(m1, y = df[train, "y"], data = df[train, ],
+                        cost = rtmspe, K = 5, R = 100)
+  cv_m1_test   <- cvFit(m1, y = df[test, "y"], data = df[test, ],
+                        cost = rtmspe, K = 5, R = 100)
+  
+  cv_fs_train  <- cvFit(m_fs, y = df[train, "y"], data = df[train, ],
+                        cost = rtmspe, K = 5, R = 100)
+  cv_fs_test   <- cvFit(m_fs, y = df[test, "y"], data = df[test, ],
+                        cost = rtmspe, K = 5, R = 100)
+  
+  cv_bs_train  <- cvFit(m_bs, y = df[train, "y"], data = df[train, ],
+                        cost = rtmspe, K = 5, R = 100)
+  cv_bs_test   <- cvFit(m_bs, y = df[test, "y"], data = df[test, ],
+                        cost = rtmspe, K = 5, R = 100)
+})
+
+# Parallel boxplots to compare models
+boxplot(
+  list(
+    Full_Train     = cv_m1_train$reps,
+    Full_Test      = cv_m1_test$reps,
+    Forward_Train  = cv_fs_train$reps,
+    Forward_Test   = cv_fs_test$reps,
+    Backward_Train = cv_bs_train$reps,
+    Backward_Test  = cv_bs_test$reps
+  ),
+  ylab = "RRMSE",
+  main = "5-fold CV (100 reps, relative RMSE)",
+  col = "lightblue",
+  ylim = c(0, max(
+    cv_m1_train$reps, cv_m1_test$reps,
+    cv_fs_train$reps, cv_fs_test$reps,
+    cv_bs_train$reps, cv_bs_test$reps
+  ))
+)
+
+```
+
+We compared different indicators. Both state that forward selection is best :)
