@@ -1,0 +1,358 @@
+---
+title: "Exercise3_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "2025-10-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 0. Preparaition of data as in last exercise
+
+```{r, echo=TRUE}
+ load("building.RData")
+set.seed(69)
+ n <- nrow(df)
+ train <- sample(1:n, size = round(2/3 * n))
+ test <- (1:n)[-train]
+ head(df)
+```
+
+Train/test split done as in last exercise. Once we fit each model (PCR, L0 regression, etc.), we can compare them by their RMSE on this training and test data.
+
+# 1. Principal component regression (PCR)
+
+## 1a) PCR model
+
+We scale the data and use a 10 fold cross-validation.
+
+```{r, echo=TRUE}
+library(pls)
+
+# Fit a Principal Component Regression model
+m_pcr1 <- pcr(
+  y ~ .,                 # response vs. all predictors
+  data = df[train, ],    # only use training data
+  scale = TRUE,          # standardize predictors
+  validation = "CV",     # enables cross-validation
+  segments = 10          # 10-fold CV
+)
+summary(m_pcr1)
+```
+
+## 1b) errors from CV - optimal component amount
+
+```{r, echo=TRUE}
+validationplot(m_pcr1, val.type = "RMSEP")
+```
+
+Looks very weird since pcr() tries to go all the way up to 107 components with cross-validation having to evaluate models with almost as many parameters as data points. That leads to numerical instability and with the exploding RMSEP. A solution could be to cap the number of components used from PSA (i tried to get the number as big as possible before the RMSEP starts to explode agian, so for a ncomp \> 68 we get similar plot as before:
+
+```{r, echo=TRUE}
+m_pcr2 <- pcr(
+  y ~ .,                 # response vs. all predictors
+  data = df[train, ],    # only use training data
+  scale = TRUE,          # standardize predictors
+  validation = "CV",     # enables cross-validation
+  segments = 10,         # 10-fold CV
+  ncomp = 68
+)
+validationplot(m_pcr2, val.type = "RMSEP")
+```
+
+This looks way more logical, so now we can keep on with the resulting RMSE for optimal amount of components:
+
+```{r, echo=TRUE}
+rmse_values <- RMSEP(m_pcr2)$val[1, , ]  # all CV RMSEs
+opt_ncomp <- max(1, which.min(rmse_values) - 1)  # subtract 1 because index 1 is for 0 comps but ensure at least 1
+opt_ncomp
+
+opt_rmse <- min(rmse_values)
+opt_rmse
+```
+
+So the resulting cross-validation RMSE for the optimal number of components (=30) is 0.258. After that amount the RMSMEP increases agian.
+
+## 1c) plot measured y values agianst cv y values
+
+```{r, echo=TRUE}
+predplot(m_pcr2, ncomp = opt_ncomp, main = "Measured vs Cross-Validated Predictions")
+abline(0, 1, lty = 2)
+```
+
+```{r, echo=FALSE}
+y_meas <- df$y[train]
+# CV preds are stored in the model; index +1 because slice 1 is 0 comps
+y_cv   <- drop(m_pcr2$validation$pred[, , opt_ncomp + 1])
+cor(y_meas, y_cv)
+```
+
+## 1d) plot predicted agianst observed value for the test data
+
+```{r, echo=TRUE}
+# --- predict on TEST data ---
+y_test  <- df$y[test]
+y_hat   <- as.numeric(predict(m_pcr2, newdata = df[test, ], ncomp = opt_ncomp))
+
+# --- RMSE on test ---
+rmse_test <- sqrt(mean((y_test - y_hat)^2))
+rmse_test
+
+# --- predicted vs observed plot (test) ---
+plot(y_test, y_hat,
+     xlab = "observed (test y)",
+     ylab = "predicted (PCR, test)",
+     main = paste0("Test Set: Predicted vs Observed (ncomp = ", opt_ncomp, ")"))
+abline(0, 1, lty = 2)   # 45° reference line
+```
+
+Prediction on test data actually not that bad. With RMSE of 0.258 for the training and 0.265 for the testdata we have reached a working model which doesnt tend to over- or underfitting. In previous exercise we reached a lower RMSE with some methods but had severe overfitting with it.
+
+## 1e) visualize scatterplots of first two vectors of Z and V
+
+The `scores` (Z) and `loadings` (V) are computed during model training — they describe how the training X variables were transformed into principal components.
+
+```{r, echo=TRUE}
+Z <- m_pcr2$scores      # principal component scores for training data (observations)
+V <- m_pcr2$loadings    # loadings for original predictors (variables)
+
+plot(Z[,1], Z[,2],
+     xlab = "PC1 scores",
+     ylab = "PC2 scores",
+     main = "Scores: PC1 vs PC2")
+abline(h = 0, v = 0, lty = 2)
+
+```
+
+Each point = one training observation, positioned according to its projection onto PC1 and PC2. Quite an interesting shape. +-4 might count as around 0, there are no really big outliers, everything is kind of at the curve. s
+
+```{r, echo=TRUE}
+plot(V[,1], V[,2],
+     xlab = "PC1 loadings",
+     ylab = "PC2 loadings",
+     main = "Loadings: PC1 vs PC2")
+abline(h = 0, v = 0, lty = 2)
+```
+
+Each point = one original predictor variable, showing how strongly and in what direction it contributes to PC1 and PC2. They are somewhat centered around 0 A lot of scattering around the right side of PC1 loadings might explain the bigger PC1 scores in the plot before.
+
+# 2. l0-norm regression
+
+$$
+\min_{\boldsymbol{\beta}} \; \tfrac{1}{2}\,\| \mathbf{y} - \mathbf{X}\boldsymbol{\beta} \|_2^2
+\;+\; \lambda \, \|\boldsymbol{\beta}\|_0 \,,
+$$ \## 2a)
+
+```{r, echo=TRUE}
+library(L0Learn)
+
+Xtr <- as.matrix(df[train, setdiff(names(df), "y")])
+ytr <- df$y[train]
+maxK <- min(100, ncol(Xtr))
+
+fit_l0_cv <- L0Learn.cvfit(
+  Xtr, ytr,
+  loss        = "SquaredError", 
+  penalty     = "L0",
+  nFolds      = 10,
+  seed        = 69,
+  maxSuppSize = maxK
+)
+
+plot(fit_l0_cv, main = "L0 (CV): Cross-validated error vs. model size")
+cvMeans <- fit_l0_cv$cvMeans[[1]]
+min(cvMeans)
+fit_l0_cv$fit$suppSize[[1]][which.min(cvMeans)]
+```
+
+The cross-validation curve shows that prediction error decreases rapidly as the support size (number of selected variables) increases up to about 20–30 predictors, after which it stabilizes and then rises again, indicating overfitting beyond that point. We choose the lowest Error mean and check its step one up and that Support Size gives us the lambda for the optimal model. But as the absolute smallest CV error we find in a model with 28 predictors of about 20.88
+
+## 2b)
+
+```{r, echo=TRUE}
+best_lambda <- fit_l0_cv$fit$lambda[[1]][which.min(cvMeans)]
+cat('The optimal lambda is : ', best_lambda)
+best_beta <- as.vector(fit_l0_cv$fit$beta[[1]][,which.min(cvMeans)])
+var_names <- colnames(Xtr)
+
+```
+
+At this penalty level (lambda = 2.52212e-05), the algorithm selected 28 variables — the smallest model whose cross-validated prediction error is minimal. The still active variables are:
+
+```{r, echo=TRUE}
+# combine into a table
+coef_table <- data.frame(
+  Variable = var_names,
+  Coefficient = best_beta
+)
+
+# keep only nonzero coefficients
+nonzero_vars <- subset(coef_table, Coefficient != 0)
+nonzero_vars
+```
+
+## 2c) fitted values against the response for the training data
+
+```{r, echo=TRUE}
+## ---- L0: fitted vs observed on TRAIN + RMSE ----
+# Path 1 assumed (you used [[1]] for cvMeans). If you used a different path, change g <- 1.
+g <- 1
+idx <- which.min(cvMeans)  # from your earlier code: cvMeans <- fit_l0_cv$cvMeans[[1]]
+
+beta_L0 <- as.vector(fit_l0_cv$fit$beta[[g]][, idx])  # coefficients (no intercept)
+a0_L0   <- fit_l0_cv$fit$a0[[g]][idx]                 # intercept
+
+yhat_tr_L0 <- as.numeric(a0_L0 + Xtr %*% beta_L0)
+
+rmse_tr_L0 <- sqrt(mean( (ytr - yhat_tr_L0)^2 ))
+rmse_tr_L0
+
+plot(ytr, yhat_tr_L0,
+     xlab = "Observed y (TRAIN)",
+     ylab = "Fitted y (L0, TRAIN)",
+     main = paste0("L0 TRAIN: Fitted vs Observed (|supp| = ", sum(beta_L0!=0), 
+                   ", RMSE = ", round(rmse_tr_L0, 3), ")"),
+     pch = 19)
+abline(0, 1, lty = 2)
+
+
+## ---- PCR: fitted vs observed on TRAIN + RMSE (same split) ----
+# If you already computed opt_ncomp earlier, reuse it; otherwise recompute safely:
+rmse_values <- RMSEP(m_pcr2)$val[1,,]           # CV RMSE for 0..ncomp
+opt_ncomp   <- max(1, which.min(rmse_values) - 1)
+
+yhat_tr_PCR <- as.numeric(predict(m_pcr2, newdata = df[train, ], ncomp = opt_ncomp))
+ytr_PCR     <- df$y[train]
+
+rmse_tr_PCR <- sqrt(mean( (ytr_PCR - yhat_tr_PCR)^2 ))
+rmse_tr_PCR
+
+plot(ytr_PCR, yhat_tr_PCR,
+     xlab = "Observed y (TRAIN)",
+     ylab = paste0("Fitted y (PCR, ncomp = ", opt_ncomp, ")"),
+     main = paste0("PCR TRAIN: Fitted vs Observed (RMSE = ", round(rmse_tr_PCR, 3), ")"),
+     pch = 19)
+abline(0, 1, lty = 2)
+
+```
+
+The L0 model fits the training data slightly better than PCR since the RMSE error is lower. But the difference is so small that both have around the same predictive capacity. It doesn't really mean L0 is "better". The true test is yet to come when we do the same comparison with the test data:
+
+## 2d) fitted values against the response for the test data
+
+```{r, echo=TRUE}
+## --- Prepare test data ---
+Xte <- as.matrix(df[test, setdiff(names(df), "y")])
+yte <- df$y[test]
+
+## --- L0: predict on test data and compute RMSE ---
+yhat_te_L0 <- as.numeric(a0_L0 + Xte %*% beta_L0)
+rmse_te_L0 <- sqrt(mean((yte - yhat_te_L0)^2))
+rmse_te_L0
+
+plot(yte, yhat_te_L0,
+     xlab = "Observed y (TEST)",
+     ylab = "Predicted y (L0)",
+     main = paste0("L0 TEST: Predicted vs Observed (RMSE = ", round(rmse_te_L0, 3), ")"),
+     pch = 19)
+abline(0, 1, lty = 2)
+
+## --- PCR: predict on test data and compute RMSE ---
+yhat_te_PCR <- as.numeric(predict(m_pcr2, newdata = df[test, ], ncomp = opt_ncomp))
+yte_PCR <- df$y[test]
+
+rmse_te_PCR <- sqrt(mean((yte_PCR - yhat_te_PCR)^2))
+rmse_te_PCR
+
+plot(yte_PCR, yhat_te_PCR,
+     xlab = "Observed y (TEST)",
+     ylab = "Predicted y (PCR)",
+     main = paste0("PCR TEST: Predicted vs Observed (RMSE = ", round(rmse_te_PCR, 3), ")"),
+     pch = 19)
+abline(0, 1, lty = 2)
+
+
+```
+
+Both models achieve almost identical prediction accuracy on the test data (RMSE ca. 0.26). The small difference (\< 0.5 %) suggests that the underlying signal can be captured either by a sparse subset of predictors (L0) or by a lower-dimensional projection (PCR). The choice between them therefore depends more on interpretability: L0 provides explicit variable selection, whereas PCR offers smoother, component-based representation.
+
+## 2e)
+
+```{r, echo=TRUE}
+## ---- L0 coefficients ----
+g <- 1  # same path as before
+idx <- which.min(cvMeans)
+beta_L0 <- as.vector(fit_l0_cv$fit$beta[[g]][, idx])
+a0_L0   <- fit_l0_cv$fit$a0[[g]][idx]
+
+names(beta_L0) <- colnames(Xtr)
+coef_L0 <- data.frame(
+  Variable = names(beta_L0),
+  Coefficient = beta_L0
+)
+coef_L0_nonzero <- subset(coef_L0, Coefficient != 0)
+
+## ---- PCR coefficients ----
+# use optimal number of components
+rmse_values <- RMSEP(m_pcr2)$val[1,,]
+opt_ncomp   <- max(1, which.min(rmse_values) - 1)
+
+coef_PCR <- as.data.frame(as.matrix(coef(m_pcr2, ncomp = opt_ncomp)))
+coef_PCR$Variable <- rownames(coef_PCR)
+names(coef_PCR)[1] <- "Coefficient"
+
+coef_PCR_nonzero <- subset(coef_PCR, Coefficient != 0)
+
+```
+
+```{r, echo=TRUE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Combine coefficient data again (if not already in coef_compare)
+coef_compare <- full_join(coef_L0, coef_PCR, by = "Variable", suffix = c("_L0", "_PCR")) %>%
+  replace(is.na(.), 0) %>%
+  pivot_longer(
+    cols = starts_with("Coefficient"),
+    names_to = "Model",
+    values_to = "Coefficient"
+  ) %>%
+  mutate(Model = ifelse(Model == "Coefficient_L0", "L0", "PCR"))
+
+# Optional: keep only non-zero or most relevant vars (e.g. top 40 by abs value)
+top_vars <- coef_compare %>%
+  group_by(Variable) %>%
+  summarise(max_abs = max(abs(Coefficient))) %>%
+  arrange(desc(max_abs)) %>%
+  slice_head(n = 40)
+
+coef_top <- coef_compare %>%
+  filter(Variable %in% top_vars$Variable)
+
+# --- Bigger, clearer plot ---
+ggplot(coef_top, aes(x = reorder(Variable, Coefficient),
+                     y = Coefficient, fill = Model)) +
+  geom_col(position = "dodge", width = 0.9) +
+  coord_flip() +
+  scale_fill_manual(values = c("L0" = "#377eb8", "PCR" = "#e41a1c")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.y = element_text(size = 10),
+    legend.position = "top",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 11),
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
+  ) +
+  labs(
+    title = "Regression Coefficients: L0 vs PCR",
+    x = "Variable (Top 40 by |Coefficient|)",
+    y = "Coefficient Value",
+    fill = "Model"
+  )
+
+```
+
+(here only top 40 variables by absolute coefficient magnitude shown) The coefficient comparison shows that the L0 regression yields a sparse model with only a limited number of strong predictors (blue bars), while PCR distributes small coefficients across nearly all variables (red bars). Despite this structural difference, both models achieve similar predictive performance (RMSE ca. 0.26). This indicates that the key predictive information is concentrated in a subset of variables captured by L0, whereas PCR represents the same information through combinations of many correlated predictors.
