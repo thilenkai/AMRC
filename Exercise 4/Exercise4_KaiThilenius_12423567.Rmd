@@ -1,0 +1,133 @@
+---
+title: "Exercise4_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "2025-11-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Introduction and appropriate split
+
+Data set is a multivariate time series so we need a useful training/test split. To evaluate we used the RMSE in the last exercises already. We had a suitable train/test split with the chosen random seed so we just keep on using that one.
+
+I don't think because it is a time series dataset we would need to use a time-based (chronological) split.
+
+```{r, echo=TRUE}
+ load("building.RData")
+set.seed(69)
+ n <- nrow(df)
+ train <- sample(1:n, size = round(2/3 * n))
+ test <- (1:n)[-train]
+ head(df)
+```
+
+## 2. Partial Least Squares regression (PLS)
+
+### 2 a) + b) Training PLS model and finding optimal components amount
+
+We are using `plsr()` with 10 CV folds and scale the inputs. Also we cap the components before they explode radically agian with the `ncomp` from last exercise:
+
+```{r, echo=TRUE}
+library(pls)
+
+# --- Fit PLS with 10-fold cross-validation ---
+m_pls <- plsr(
+  y ~ .,
+  data       = df[train, ],
+  scale      = TRUE,
+  validation = "CV",
+  segments   = 10,
+  ncomp = 68 # from last exercise
+
+)
+
+# --- Extract CV RMSEs and find the optimal number of components ---
+rmse_curve <- RMSEP(m_pls)$val[1, , ]        # RMSE for comps 0..K
+opt_ncomp  <- max(1, which.min(rmse_curve) - 1)  # ensure ≥ 1
+opt_rmse   <- rmse_curve[opt_ncomp + 1]      # matching CV RMSE
+
+# --- Plot CV RMSE vs number of components, with annotation ---
+validationplot(m_pls, val.type = "RMSEP", main = "PLS Cross-Validation (10-fold)")
+# Add vertical and text annotation for the optimal point
+abline(v = opt_ncomp, col = "red", lty = 2)
+text(opt_ncomp + 1, opt_rmse,
+     labels = paste0("opt = ", opt_ncomp, " comps\nRMSE = ", round(opt_rmse, 4)),
+     pos = 4, col = "red", cex = 0.9)
+
+
+```
+
+The optimal number of components according to 10-fold cross-validation is *opt_ncomp* ,with a minimum cross-validated RMSE of *0.258*. The plot above illustrates this minimum (red dashed line). We do not use the RMSE + 1 StdErr to find a simpler model because we already have reduced the number of components a lot.
+
+### 2 c) measured `y` values against the crossvalidated `y` values
+
+```{r, echo=TRUE}
+# --- Plot cross-validated predictions vs measured values ---
+predplot(m_pls, ncomp = opt_ncomp,
+         main = paste("Measured vs Cross-Validated Predictions (PLS, ncomp =", opt_ncomp, ")"),
+         cex = 1, pch = 19, col = "steelblue")
+
+# add 45° reference line
+abline(0, 1, col = "red", lty = 2, lwd = 2)
+
+```
+
+We see a slight curve, which we also noticed with the models from previous exercises. Also visually in this scatterplot (first one we do actually) there seem to be no too big outliers and a quite equal distribution along the 45° line - confirming that our PLS model generalizes well on the trainig data under cross-validation.
+
+### 2 d) predicted vs observed
+
+```{r, echo=TRUE}
+y_te    <- df$y[test]
+yhat_te <- as.numeric(predict(m_pls, newdata = df[test, ], ncomp = opt_ncomp))
+
+# RMSE on test
+rmse_te_pls <- sqrt(mean((y_te - yhat_te)^2))
+rmse_te_pls
+
+# Predicted vs observed plot (TEST)
+plot(y_te, yhat_te,
+     xlab = "Observed y (TEST)",
+     ylab = paste0("Predicted y (PLS, ncomp = ", opt_ncomp, ")"),
+     main = paste0("PLS TEST: Predicted vs Observed (RMSE = ",
+                   round(rmse_te_pls, 4), ")"),
+     pch = 19)
+abline(0, 1, lty = 2, col = "red", lwd = 2)
+
+```
+
+With *0.281* the prediction error to the test data with, our PLS model is not that much worse in test than in training (*0.258*, which makes a differece of only 0.023 RMSEPM).
+
+When we compare it to the errors of previous models we stay in a similar area. PCR was with 0.265 a little better but also used way more components (33 instad of *8* with PLS).
+
+## 3. Ridge Regression
+
+### 3 a) `glmnet()` on training data - parameters for `lambda`?
+
+```{r, echo=TRUE}
+
+
+```
+
+### 3 b)
+
+```{r, echo=TRUE}
+
+
+```
+
+### 3 c)
+
+```{r, echo=TRUE}
+
+
+```
+
+### 3 d)
+
+```{r, echo=TRUE}
+
+
+```
