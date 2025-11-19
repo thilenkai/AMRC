@@ -40,13 +40,13 @@ m_pls <- plsr(
   scale      = TRUE,
   validation = "CV",
   segments   = 10,
-  ncomp = 68 # from last exercise
+  ncomp = 60 # from last exercise
 
 )
 
 # --- Extract CV RMSEs and find the optimal number of components ---
 rmse_curve <- RMSEP(m_pls)$val[1, , ]        # RMSE for comps 0..K
-opt_ncomp  <- max(1, which.min(rmse_curve) - 1)  # ensure ≥ 1
+opt_ncomp  <- max(1, which.min(rmse_curve) - 1)  # ensure >= 1
 opt_rmse   <- rmse_curve[opt_ncomp + 1]      # matching CV RMSE
 
 # --- Plot CV RMSE vs number of components, with annotation ---
@@ -107,27 +107,117 @@ When we compare it to the errors of previous models we stay in a similar area. P
 ### 3 a) `glmnet()` on training data - parameters for `lambda`?
 
 ```{r, echo=TRUE}
+# --- Load packages and prepare data ---
+library(glmnet)
+
+Xtr <- as.matrix(df[train, setdiff(names(df), "y")])
+ytr <- df$y[train]
+
+# --- Fit Ridge regression (alpha = 0 → Ridge) ---
+ridge_mod <- glmnet(
+  Xtr, ytr,
+  alpha = 0,         # Ridge penalty (L2)
+  standardize = TRUE # predictors are standardized by default
+)
+
+# --- Plot the coefficient paths ---
+plot(ridge_mod, xvar = "lambda", label = TRUE)
+title("Ridge Regression Coefficient Paths", line = 2.5)
+
+# --- Inspect the default lambda (lambda) sequence ---
+lambda_values <- ridge_mod$lambda
+cat("Number of lambda values:", length(lambda_values), "\n")
+cat("Range of lambda values:\n")
+print(range(lambda_values))
+
+# --- Verify spacing: first 5 values (largest lambda → smallest lambda) ---
+head(lambda_values)
+tail(lambda_values)
+
 
 
 ```
 
-### 3 b)
+Each colored line represents one predictors coefficient path as lambda changes. All of the 107 predictors are always there, never eliminated but just shrunken. The applied Ridge regression penalizes their size (magnitude) and pulls them closer to zero, without setting them exactly to zero. Moving right on x-axis actually corresponds to a smaller `lambda` (because of double negative)
+
+Default `lambda` parameters used see output above.
+
+The parameter `alpha` decides over the model used –\> 0 = Ridge (L2 penalty, no variable selection) and 1 = Lasso (L1 penalty) Regression.
+
+### 3 b) optimal tuning parameters
+
+```{r, echo=TRUE}
+library(glmnet)
+
+# --- Prepare training data ---
+Xtr <- as.matrix(df[train, setdiff(names(df), "y")])
+ytr <- df$y[train]
+
+# --- Cross-validation for Ridge Regression (alpha = 0) ---
+set.seed(69)  # reproducible folds
+ridge_cv <- cv.glmnet(
+  Xtr, ytr,
+  alpha = 0,          # ridge penalty
+  standardize = TRUE, # standardize predictors
+  nfolds = 10          # 10-fold CV
+)
+
+# --- Plot cross-validation results ---
+plot(ridge_cv)
+title("Ridge Regression Cross-Validation", line = 2.5)
+
+# --- Optimal lambda values ---
+ridge_cv$lambda.min     # lambda that gives minimum CV error
+ridge_cv$lambda.1se     # largest lambda within 1 SE of min (simpler model)
+
+```
+
+We use CV with the exact same fold and random seed as before. We take the lowest lambda and find the optimal tuning parameter by applying the -1se-rule we get a lambda of 0.163 — all predictors remain in the model but their magnitudes are reduced by this L2 penalty. The regression coefficients are listed here:
 
 ```{r, echo=TRUE}
 
+coef_opt <- coef(ridge_cv, s = "lambda.min")
+coef_opt
 
 ```
 
-### 3 c)
+### 3 c) prediction
 
 ```{r, echo=TRUE}
+library(glmnet)
+
+# --- Prepare test data ---
+Xte <- as.matrix(df[test, setdiff(names(df), "y")])
+yte <- df$y[test]
+
+# --- Predict with optimal model (lambda.min from cross-validation) ---
+yhat_te_ridge <- as.numeric(predict(ridge_cv, newx = Xte, s = "lambda.min"))
+
+# --- Compute RMSE on the test data ---
+rmse_ridge_te <- sqrt(mean((yte - yhat_te_ridge)^2))
+cat("Test RMSE (Ridge):", round(rmse_ridge_te, 4), "\n")
+
+# --- Plot predicted vs observed test values ---
+plot(yte, yhat_te_ridge,
+     xlab = "Observed y (TEST)",
+     ylab = "Predicted y (Ridge, lambda.min)",
+     main = paste0("Ridge Regression: Predicted vs Observed (RMSE = ",
+                   round(rmse_ridge_te, 4), ")"),
+     pch = 19, col = "steelblue")
+abline(0, 1, lty = 2, col = "red", lwd = 2)
 
 
 ```
 
-### 3 d)
+Our model worked and predicted quite okay. Honestly i was expecting a better RMSESEM since we used all this fancy methods and graphs but are still in the same area as the models used in previous exercises with L0 being the best:
 
-```{r, echo=TRUE}
+| Model                                  | RMSE on test data |
+|----------------------------------------|-------------------|
+| Principal component regression (PCR)   | 0.2653            |
+| L0-norm                                | 0.2642            |
+| Partial Least Squares regression (PLS) | 0.2809            |
+| Ridge                                  | 0.2646            |
 
+### 3 d) not strictly in/decreasing curves
 
-```
+I can also see this behaviour in at least two of the components (black on top, might be comp. 20 and orangy at the bottom, comp. 2). This might be a cause of connection inbetween different components - maybe because of the time series and various logs. When other components magnitude is decreaed, maybe there is new "space" for those two components to increase agian - agianst the normal assumption they might in/decrease continuously.

@@ -1,0 +1,43 @@
+---
+title: "Exercise6_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "2025-11-17"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. loading data and description
+
+```{r, echo=TRUE}
+d <- read.csv2("bank.csv")
+d$duration <- NULL
+names(d)
+
+```
+
+Do not use `duration` because at prediction time (before the call ends) you don’t know it.
+
+Observe class imbalance:
+
+```{r, echo=TRUE}
+table(d$y)
+prop.table(table(d$y))
+```
+
+```{r, echo=TRUE}
+set.seed(69)
+n <- nrow(d)
+train <- sample(seq_len(n), size = round(0.7 * n))
+test  <- setdiff(seq_len(n), train)
+
+d_train <- d[train, ]
+d_test  <- d[test, ]
+
+```
+
+## 1. LDA (Linear Discrimant Analysis)
+
+## 2. maximize the balanced accuracy

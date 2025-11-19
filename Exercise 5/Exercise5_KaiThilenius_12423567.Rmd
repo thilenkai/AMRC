@@ -1,0 +1,341 @@
+---
+title: "Exercise5_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "2025-11-07"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. Importing the dataset - quite some struggle
+
+The package "robstHD" is not available for my version of R since it seems to be no longer part of CRAN. I tried installing via GitHub but it failed too. I tired loading it from another package (ISLR2) which contains a "NCI60" too but this data doesn't match as it doesn't have any "protein" data. Installing package "robustHD" helped.
+
+```{r, echo=TRUE}
+data("nci60", package = "robustHD")
+ls()
+dim(gene); dim(protein)
+
+```
+
+-   59 samples (incomplete cases already removed)
+
+-   22 283 gene features
+
+-   162 protein features
+
+```{r, echo=TRUE}
+# choose a protein column with the largest variance (good spread)
+j <- 130
+cat("Using protein column:", j, "\n")
+
+y <- as.numeric(protein[, j])   # response (length 64)
+X <- as.matrix(gene)            # predictors (64 x 6830)
+
+```
+
+```{r, echo=TRUE}
+set.seed(69)
+n <- nrow(X)
+train <- sample(seq_len(n), size = floor(0.75 * n))
+test  <- setdiff(seq_len(n), train)
+
+# build final matrices/vectors
+Xtr <- X[train, , drop = FALSE]
+ytr <- y[train]
+Xte <- X[test,  , drop = FALSE]
+yte <- y[test]
+
+# quick sanity
+length(train); length(test)
+```
+
+```{r, echo=TRUE}
+library(glmnet)
+
+# Perform ridge regression (alpha = 0)
+set.seed(69)
+ridge_cv <- cv.glmnet(
+  Xtr, ytr,
+  alpha = 0,
+  nfolds = min(10, length(ytr)),
+  standardize = TRUE,
+  nlambda = 200,             # denser
+  lambda.min.ratio = 1e-4    # explore much smaller lambda (default is 1e-3)
+)
+
+# --- Plot cross-validated MSE vs log(lambda) ---
+plot(ridge_cv)
+title(paste("Ridge Regression CV (Protein", j, ")"), line = 2.5)
+
+# --- Extract optimal lambda values ---
+ridge_cv$lambda.min    # minimum CV error
+ridge_cv$lambda.1se    # simpler model within 1 std. error
+
+# (optional) print them nicely
+cat("Optimal lambda (min):", ridge_cv$lambda.min, "\n")
+cat("1-SE lambda:", ridge_cv$lambda.1se, "\n")
+
+```
+
+We choose lambda as 319.2464 with best -1 SE.
+
+## 1. Ridge regression
+
+```{r, echo=TRUE}
+
+# --- Extract the optimal lambda ---
+lambda_opt <- ridge_cv$lambda.min
+cat("Optimal lambda used:", lambda_opt, "\n")
+
+# --- Extract the corresponding coefficients ---
+ridge_coef <- coef(ridge_cv, s = lambda_opt)
+ridge_coef[1:10, ]   # show the first 10 (intercept + top 9 genes)
+cat("Number of predictors with nonzero coefficients:", sum(ridge_coef != 0) - 1, "\n")
+
+# --- Predict on the test set ---
+yhat_ridge <- as.numeric(predict(ridge_cv, newx = Xte, s = lambda_opt))
+
+# --- Compute test RMSE ---
+rmse_ridge <- sqrt(mean((yte - yhat_ridge)^2))
+cat("Test RMSE (ridge):", round(rmse_ridge, 4), "\n")
+
+# --- Plot predicted vs observed values on the test set ---
+plot(yte, yhat_ridge,
+     pch = 19, col = "steelblue",
+     xlab = "Observed y (test)",
+     ylab = paste0("Predicted y (ridge, lambda = ", round(lambda_opt, 2), ")"),
+     main = paste0("Ridge Regression — Test Predictions (RMSE = ", round(rmse_ridge, 4), ")"))
+abline(0, 1, col = "red", lty = 2, lwd = 2)
+
+
+
+```
+
+Ridge regression tends to “average” predictions when data dimensionality is extreme relative to sample size. This leads to lambda getting incredible big which reveals in an "empty model" like prediction. I tried to find a better solution but also with only allowing smaller lambdas we did not really get better predictions. So we have to keep it like this :(
+
+## 2 Lasso regression
+
+```{r, echo=TRUE}
+set.seed(69)
+
+# --- LASSO CV (alpha = 1) ---
+# If your ridge CV chose very large lambdas earlier, give lasso a wider/smaller range:
+lasso_cv <- cv.glmnet(
+  Xtr, ytr,
+  alpha = 1,                 # LASSO
+  nfolds = min(10, length(ytr)),
+  standardize = TRUE,
+  nlambda = 200,
+  lambda.min.ratio = 1e-4    # explore smaller lambda than the default (1e-3)
+)
+
+# CV curve
+plot(lasso_cv); title("LASSO Cross-Validation (MSE vs log(lambda))", line = 2.5)
+
+# Optimal lambdas
+lambda_min <- lasso_cv$lambda.min
+lambda_1se <- lasso_cv$lambda.1se
+cat("lambda.min (min CV error):", lambda_min, "\n")
+cat("lambda.1se (simpler):",     lambda_1se, "\n")
+```
+
+```{r, echo=TRUE}
+# Predict on TEST with lambda.min
+yhat_lasso <- as.numeric(predict(lasso_cv, newx = Xte, s = "lambda.min"))
+rmse_lasso <- sqrt(mean((yte - yhat_lasso)^2))
+cat("Test RMSE (LASSO, lambda.min):", round(rmse_lasso, 4), "\n")
+
+# Plot predicted vs observed (TEST)
+plot(yte, yhat_lasso,
+     pch = 19, col = "tomato",
+     xlab = "Observed y (TEST)",
+     ylab = paste0("Predicted y (LASSO, lambda = ", signif(lambda_min, 3), ")"),
+     main = paste0("LASSO — Test Predictions (RMSE = ", round(rmse_lasso, 4), ")"))
+abline(0, 1, lty = 2, col = "gray30", lwd = 2)
+
+
+```
+
+## 3 Elastic net regression
+
+```{r, echo=TRUE}
+
+set.seed(69)
+
+# --- 1) Define an alpha grid (you can play with this)
+alpha_grid <- c(0, 0.25, 0.5, 0.75, 1)   # 0=ridge, 1=lasso
+
+# Use a richer lambda search than defaults (helps with p >> n)
+nl <- 200
+lmr <- 1e-4
+
+fits <- vector("list", length(alpha_grid))
+summ <- data.frame(
+  alpha = alpha_grid,
+  lambda.min = NA_real_,
+  lambda.1se = NA_real_,
+  cvm.min    = NA_real_,
+  nnz.min    = NA_integer_,  # non-zeros at lambda.min
+  nnz.1se    = NA_integer_   # non-zeros at lambda.1se
+)
+
+for (i in seq_along(alpha_grid)) {
+  a <- alpha_grid[i]
+  cvfit <- cv.glmnet(
+    Xtr, ytr,
+    alpha = a,
+    nfolds = min(10, length(ytr)),
+    standardize = TRUE,
+    nlambda = nl,
+    lambda.min.ratio = lmr
+  )
+  fits[[i]] <- cvfit
+
+  # record metrics
+  summ$lambda.min[i] <- cvfit$lambda.min
+  summ$lambda.1se[i] <- cvfit$lambda.1se
+  summ$cvm.min[i]    <- min(cvfit$cvm)
+
+  # count non-zero coefficients (exclude intercept)
+  b.min <- as.matrix(coef(cvfit, s = "lambda.min"))[-1, , drop = FALSE]
+  b.1se <- as.matrix(coef(cvfit, s = "lambda.1se"))[-1, , drop = FALSE]
+  summ$nnz.min[i] <- sum(b.min != 0)
+  summ$nnz.1se[i] <- sum(b.1se != 0)
+}
+
+summ
+
+op <- par(mfrow = c(1,2))
+plot(summ$alpha, summ$cvm.min, type="b", pch=19,
+     xlab=expression(alpha), ylab="CV MSE (min)",
+     main="Elastic Net: CV error vs alpha")
+grid()
+
+plot(summ$alpha, summ$nnz.min, type="b", pch=19, ylim = range(c(summ$nnz.min, summ$nnz.1se)),
+     xlab=expression(alpha), ylab="# non-zero coefficients",
+     main="Sparsity vs alpha")
+lines(summ$alpha, summ$nnz.1se, type="b", pch=1)
+legend("topright", c("lambda.min","lambda.1se"), pch=c(19,1), bty="n")
+grid()
+par(op)
+```
+
+```{r, echo=TRUE}
+cand <- subset(summ, nnz.min >= 1)                 # avoid empty
+best_idx <- which.min(cand$cvm.min)
+best_row <- cand[best_idx, ]
+best_row
+# locate the stored cvfit for this alpha
+i_alpha <- which(alpha_grid == best_row$alpha)
+cvbest  <- fits[[i_alpha]]
+
+lambda_use <- "lambda.min"   # or "lambda.1se" if you want simpler
+
+# Coefficients
+coef_best <- coef(cvbest, s = lambda_use)
+nnz_best  <- sum(as.matrix(coef_best)[-1, ] != 0)
+
+cat("Chosen alpha:", best_row$alpha, "\n")
+cat("Chosen lambda:", if(lambda_use=="lambda.min") best_row$lambda.min else best_row$lambda.1se, "\n")
+cat("# non-zero predictors:", nnz_best, "\n")
+
+# Test predictions + RMSE
+yhat_enet <- as.numeric(predict(cvbest, newx = Xte, s = lambda_use))
+rmse_enet <- sqrt(mean((yte - yhat_enet)^2))
+cat("Elastic Net TEST RMSE:", round(rmse_enet, 4), "\n")
+
+# Plot predicted vs observed (TEST)
+plot(yte, yhat_enet, pch=19, col="#2c7fb8",
+     xlab="Observed y (TEST)",
+     ylab=paste0("Predicted y (EN, alpha=", best_row$alpha, ", ", lambda_use, ")"),
+     main=paste0("Elastic Net — Test (RMSE=", round(rmse_enet,4), ")\n",
+                 "#non-zero=", nnz_best))
+abline(0,1,lty=2,col="gray30",lwd=2)
+
+```
+
+## 4. Adaptive Lasso regression
+
+```{r, echo=TRUE}
+library(glmnet)
+## 1) Ridge coefficients (exclude intercept)
+beta_ridge <- as.numeric(coef(ridge_cv, s = "lambda.min"))[-1]
+
+## 2) Adaptive weights  w_j = 1/(|beta_ridge_j|^gamma + eps)
+##    Use a non-tiny eps to avoid monstrous weights from near-zero ridge betas.
+gamma <- 1
+eps   <- 1e-3
+w     <- 1 / (abs(beta_ridge)^gamma + eps)
+
+## (optional but recommended) cap extremely large weights
+w <- pmin(w, quantile(w, 0.99))  # trim the top 1%
+
+## 3) CV Adaptive Lasso
+set.seed(69)
+alasso_cv <- cv.glmnet(
+  Xtr, ytr,
+  alpha = 1,                    # L1 penalty
+  penalty.factor = w,           # <-- adaptive weights
+  standardize = TRUE,
+  nfolds = min(10, length(ytr)),
+  nlambda = 200,
+  lambda.min.ratio = 1e-4       # explore smaller lambdas but not too tiny
+)
+
+plot(alasso_cv); title("Adaptive Lasso — CV", line = 2.5)
+
+lambda_min_al <- alasso_cv$lambda.min
+lambda_1se_al <- alasso_cv$lambda.1se
+cat("lambda.min:", lambda_min_al, "  lambda.1se:", lambda_1se_al, "\n")
+
+## 4) Use the more stable 1-SE model to avoid overfitting
+coef_1se <- as.matrix(coef(alasso_cv, s = "lambda.1se"))
+nnz_1se  <- sum(coef_1se[-1, 1] != 0)
+cat("# non-zero (1-SE):", nnz_1se, "\n")
+
+## 5) Test predictions + RMSE (1-SE)
+yhat_te_al <- as.numeric(predict(alasso_cv, newx = Xte, s = "lambda.1se"))
+rmse_te_al <- sqrt(mean((yte - yhat_te_al)^2))
+cat("Adaptive Lasso TEST RMSE (1-SE):", round(rmse_te_al, 4), "\n")
+
+plot(yte, yhat_te_al,
+     pch = 19, col = "#1b9e77",
+     xlab = "Observed y (TEST)",
+     ylab = paste0("Predicted y (Adaptive Lasso, lambda.1se = ", signif(lambda_1se_al,3), ")"),
+     main = paste0("Adaptive Lasso — Test (RMSE=", round(rmse_te_al, 4), ")\n",
+                   "#non-zero = ", nnz_1se))
+abline(0, 1, lty = 2, col = "gray30", lwd = 2)
+
+
+```
+
+Seems
+
+## A - which model was useful
+
+| Model                  | RMSE on test data |
+|------------------------|-------------------|
+| Ridge regression       | 0.3945            |
+| Lasso regression       | 0.369             |
+| Elastic net regression | 0.3873            |
+| Adaptive Lasso         | 0.3498            |
+
+All the models operate in a similar RMSE are. They are all not ideally or even suitable for predicting but Adaptive Lasso has the best. RMSE value on the test data for this one selected protein.
+
+## B - most interpretable
+
+Among the tested models, the **Lasso** and **Adaptive Lasso** provide the best interpretability because they perform **automatic variable selection** by setting many coefficients exactly to zero.\
+This yields a sparse model that highlights which genes (predictors) are most relevant for predicting the protein response.
+
+In contrast, **Ridge regression** keeps all coefficients non-zero, making it difficult to interpret which variables matter most, even though it may perform similarly in terms of RMSE.
+
+The **Elastic Net** offers a good compromise: it keeps correlated genes together (useful when features are strongly correlated) and maintains moderate sparsity, making it both more stable than Lasso and more interpretable than Ridge.
+
+Therefore, **for interpretability**, the *Lasso* (or *Adaptive Lasso*, if stable) is the most useful model, while Ridge is least interpretable but often most stable.
+
+### Disclaimer
+
+ChatGPT 5 might have been used to generate some of the code and texts.
