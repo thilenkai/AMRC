@@ -1,0 +1,422 @@
+---
+title: "Exercise7_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "2025-11-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. setup for `bank.csv` like last time
+
+```{r, echo=TRUE}
+d <- read.csv2("bank.csv")
+d$y <- ifelse(d$y == "yes", 1, 0)
+d$duration <- NULL
+names(d)
+
+table(d$y)
+prop.table(table(d$y))
+```
+
+```{r, echo=TRUE}
+# Set a seed for reproducibility of the random split
+set.seed(67)
+
+train_index <- sample(1:nrow(d), 0.7 * nrow(d))
+train_data <- d[train_index, ]
+test_data <- d[-train_index, ]
+
+# Check the dimensions of the new datasets
+dim(train_data)
+dim(test_data)
+```
+
+### a) logistic regression on training
+
+```{r, echo=TRUE}
+model <- glm(y ~ ., data = train_data, family = "binomial")
+# Display the summary of the model to see the inference table
+summary(model)
+```
+
+-   **Estimate**: the effect on the log-odds of subscribing (`y = 1`)
+-   **Std. Error**: uncertainty in the estimate
+-   **z-value** = Estimate / Std.Error
+-   **Pr(\>\|z\|)**: p-value testing whether the coefficient is significantly different from 0
+
+Most variables are not statistically significant. Some are clearly significant:
+
+-   `contactunknown` - if contact data is unknown subscription probability drops strongly
+
+-   `monthoct` - apparently october, or at least the time of the year is significant
+
+-   `poutcomesuccess` - if earlier campaingns have been successful, a new one might too
+
+### b)predict the group label of the remaining test set observations
+
+```{r, echo=TRUE}
+# ---- 1. Predict probabilities on the test set ----
+pred_prob <- predict(model, newdata = test_data, type = "response")
+
+# ---- 2. Convert probabilities to class labels using cutoff 0.5 ----
+pred_class <- ifelse(pred_prob > 0.5, 1, 0)
+true_class <- test_data$y
+
+# ---- 3. Confusion table ----
+conf_mat <- table(Predicted = pred_class, Actual = true_class)
+conf_mat
+
+cat("\nConfusion Matrix:\n")
+print(conf_mat)
+cat("\nWhere:\n")
+cat("  - True class 0 = client did NOT subscribe\n")
+cat("  - True class 1 = client DID subscribe\n")
+cat("  - Rows = predicted labels, Columns = actual labels\n\n")
+
+# ---- 4. Misclassification rate for each group ----
+# For actual class 0: misclassified as 1
+mr_0 <- conf_mat["1", "0"] / sum(conf_mat[, "0"])
+
+# For actual class 1: misclassified as 0
+mr_1 <- conf_mat["0", "1"] / sum(conf_mat[, "1"])
+
+cat("Misclassification rate for class 0 (no):  ", round(mr_0, 6), "\n")
+cat("Misclassification rate for class 1 (yes): ", round(mr_1, 6), "\n\n")
+
+# ---- 5. Balanced Accuracy ----
+TPR <- conf_mat["1","1"] / sum(conf_mat[,"1"])  # Sensitivity (true positives)
+TNR <- conf_mat["0","0"] / sum(conf_mat[,"0"])  # Specificity (true negatives)
+
+balanced_acc <- 0.5 * (TPR + TNR)
+
+cat("Balanced Accuracy: ", round(balanced_acc, 6), "\n")
+
+
+```
+
+By default, `predict(glm)` returns predicted probabilities for `P(y=1 \mid x)`. Using a cutoff of `0.5`, we obtained class labels for the test set and computed the confusion matrix. From this, misclassification rates were calculated for both classes as well as the balanced accuracy, defined as the average of sensitivity and specificity.
+
+### c) problem of imbalanced groups
+
+rebalanace the training by giving higher weight to the minority class when fitting `glm()`. Let $n_0$ and $n_1$ denote the number of observations in class 0 (`y = 0`) and class 1 (`y = 1`) in the training set, and let $N = n_0 + n_1$ be the total number of training observations.
+
+We define the class weights as $$
+w_0 = \frac{N}{2 n_0}, \qquad
+w_1 = \frac{N}{2 n_1},
+$$ so that each observation in class 0 receives weight $w_0$ and each observation in class 1 receives weight $w_1$. With this choice, the total weight of class 0 and class 1 are both approximately $N/2$, which means that both classes contribute equally to the loss function, despite the imbalance in their frequencies.
+
+```{r, echo=TRUE}
+# ---- 1. Compute class frequencies in the TRAINING data ----
+tab_train <- table(train_data$y)
+tab_train
+
+n0 <- tab_train["0"]
+n1 <- tab_train["1"]
+N  <- nrow(train_data)
+
+# Class weights so that classes contribute equally
+w0 <- N / (2 * n0)
+w1 <- N / (2 * n1)
+
+# Build weights vector for each observation
+weights_vec <- ifelse(train_data$y == 0, w0, w1)
+
+# ---- 2. Fit weighted logistic regression ----
+model_w <- glm(y ~ ., data = train_data,
+               family = "binomial",
+               weights = weights_vec)
+
+summary(model_w)  # optional: see how coefficients change
+
+# ---- 3. Predict on TEST set (probabilities) ----
+prob_test_w <- predict(model_w, newdata = test_data, type = "response")
+
+# Use same cutoff 0.5 to get class labels
+pred_test_w <- ifelse(prob_test_w > 0.5, 1, 0)
+true_test   <- test_data$y
+
+# ---- 4. Confusion table ----
+conf_mat_w <- table(Predicted = pred_test_w, Actual = true_test)
+
+cat("\nWeighted logistic regression — Confusion matrix:\n")
+print(conf_mat_w)
+cat("\nRows = predicted class, Columns = actual class\n\n")
+
+# ---- 5. Misclassification rates per class ----
+# class 0 (no) → misclassified as 1
+mr0_w <- conf_mat_w["1", "0"] / sum(conf_mat_w[, "0"])
+
+# class 1 (yes) → misclassified as 0
+mr1_w <- conf_mat_w["0", "1"] / sum(conf_mat_w[, "1"])
+
+cat("Misclassification rate for class 0 (no):  ", round(mr0_w, 4), "\n")
+cat("Misclassification rate for class 1 (yes): ", round(mr1_w, 4), "\n")
+
+# ---- 6. Balanced accuracy ----
+TPR_w <- conf_mat_w["1", "1"] / sum(conf_mat_w[, "1"])  # sensitivity
+TNR_w <- conf_mat_w["0", "0"] / sum(conf_mat_w[, "0"])  # specificity
+
+bal_acc_w <- 0.5 * (TPR_w + TNR_w)
+
+cat("Balanced accuracy (weighted model): ", round(bal_acc_w, 4), "\n")
+
+```
+
+We do get an improved performance as seen in a better balanced accuracy by almost `0.1`.
+
+### d) stepwise variable selection on weighted model
+
+Repeatedly removing and adding variables based on `AIC`.
+
+```{r, echo=TRUE}
+# Stepwise selection based on the weighted logistic regression model from 1(c)
+model_w_step <- step(model_w, direction = "both", trace = FALSE)
+
+summary(model_w_step)   # optional
+```
+
+This gives a smaller and simplified model which we can use to predict on the test data agian:
+
+```{r, echo=TRUE}
+# Predict probabilities from the simplified model
+prob_test_w_step <- predict(model_w_step, newdata = test_data, type = "response")
+
+# Convert to class labels using cutoff 0.5
+pred_test_w_step <- ifelse(prob_test_w_step > 0.5, 1, 0)
+
+true_test <- test_data$y
+
+# Confusion matrix
+conf_mat_step <- table(Predicted = pred_test_w_step, Actual = true_test)
+conf_mat_step
+
+# Misclassification rates per class
+mr0_step <- conf_mat_step["1","0"] / sum(conf_mat_step[, "0"])
+mr1_step <- conf_mat_step["0","1"] / sum(conf_mat_step[, "1"])
+
+# Balanced accuracy
+TPR_step <- conf_mat_step["1","1"] / sum(conf_mat_step[,"1"])  # sensitivity
+TNR_step <- conf_mat_step["0","0"] / sum(conf_mat_step[,"0"])  # specificity
+bal_acc_step <- 0.5 * (TPR_step + TNR_step)
+
+cat("Balanced accuracy (stepwise model):", round(bal_acc_step, 4), "\n")
+
+```
+
+Measured with the balanced accuracy the variable selected, simplified model does not outperform the full model. This seems to be normal since removing variables within logistic regression rarely has a dramatic effect.
+
+## 2. data set `data(Khan)`
+
+```{r, echo=TRUE}
+# Load packages
+library(ISLR)
+library(glmnet)
+
+# Load the Khan data
+data("Khan")
+
+# Look at the list structure
+names(Khan)
+
+# Training data
+X_train <- Khan$xtrain   # n_train x p
+y_train <- Khan$ytrain   # training labels
+
+# Test data
+X_test  <- Khan$xtest
+y_test  <- Khan$ytest
+
+# Check dimensions
+dim(X_train)  # number of training samples and genes
+dim(X_test)
+table(y_train)  # class distribution in training
+table(y_test)   # class distribution in test
+```
+
+### a) `LDA` vs. `QDA` vs. `RDA`
+
+LDA (Linear Discriminant Analysis) and QDA (Quadratic Discriminant Analysis) are not suitable for the Khan data because we have **only 63 training observations and 2308 variables**. Both methods require estimating covariance matrices of dimension $2308 \times 2308$, which are singular in this high- dimensional setting and therefore **cannot be inverted**. This issue is not related to the number of classes: LDA and QDA do support multiclass problems. In contrast, **RDA uses regularized covariance estimates**, making the matrices invertible even when $p \gg n$, so RDA (Regulized Discriminant Analysis) could in principle be applied.
+
+### b)`glmnet()` with `family="multinomial"`
+
+`glmnet` requires the outcome for multinomial classification to be a **factor**.
+
+```{r, echo=TRUE}
+y_train_factor <- factor(y_train)
+y_test_factor  <- factor(y_test)
+library(glmnet)
+
+# Convert response to factor (required for multinomial glmnet)
+y_train_factor <- factor(y_train)
+y_test_factor  <- factor(y_test)
+
+# Fit multinomial model with cross-validation
+set.seed(123)
+fit_cv <- cv.glmnet(
+  x = X_train,
+  y = y_train_factor,
+  family = "multinomial",
+  type.measure = "class",     # misclassification error
+  nfolds = 10
+  # by default glmnet uses "alpha=1" -> lasso penalty
+)
+
+# Plot the CV results
+plot(fit_cv)
+
+```
+
+We see the cross-validated missclassification error, where we can choose `lambda`. `glmnet` minimizes **penalized multinomial log-likelihood**.
+
+### c) which variables contribute to the model
+
+```{r, echo=TRUE}
+# 1) Optimal lambda from cross-validation
+lambda_opt <- fit_cv$lambda.min
+cat("Optimal lambda (lambda.min):", lambda_opt, "\n\n")
+
+# 2) Coefficients for all 4 classes at lambda_opt
+coef_list <- coef(fit_cv, s = lambda_opt)
+
+# Check structure
+length(coef_list)       # should be 4 (one per class)
+names(coef_list)        # class labels
+
+# 3) Active (non-zero) coefficients per class
+active_genes_per_class <- lapply(coef_list, function(m) {
+  idx <- which(m != 0)                 # positions of non-zero coefficients
+  rownames(m)[idx]                     # corresponding variable (gene) names
+})
+
+# Print active genes per class
+for (k in seq_along(active_genes_per_class)) {
+  cat("Class", names(coef_list)[k], "non-zero coefficients:\n")
+  print(active_genes_per_class[[k]])
+  cat("\n")
+}
+
+# 4) All genes that contribute in at least one class (excluding intercept)
+all_active_genes <- unique(unlist(active_genes_per_class))
+all_active_genes <- setdiff(all_active_genes, "(Intercept)")
+
+cat("Genes that contribute to the model (union over all classes):\n")
+print(all_active_genes)
+cat("\nTotal number of contributing genes:", length(all_active_genes), "\n")
+
+```
+
+The output consists of **4 coefficient vectors**, not K-1=3 as in traditional multinomial regression.
+
+Print `lambda` to match with the plot (dotted line) from before:
+
+```{r, echo=TRUE}
+- log(lambda_opt)
+```
+
+### d) plot of relevant variable agiasnt response
+
+We know the non-zero coefficients for class 1 from 2(c) but we want to choose the most important one:
+
+```{r, echo=TRUE}
+# Use the same coef_list from 2(c)
+lambda_opt <- fit_cv$lambda.min
+coef_list  <- coef(fit_cv, s = lambda_opt)
+
+# Coefficients for class 1
+coef_class1 <- as.matrix(coef_list[[1]])  # includes intercept
+
+# Remove intercept
+coef_class1_no_int <- coef_class1[-1, , drop = FALSE]
+
+# Pick gene with largest |beta| for class 1
+idx_top <- which.max(abs(coef_class1_no_int))
+gene_top <- rownames(coef_class1_no_int)[idx_top]
+gene_top
+
+```
+
+```{r, echo=TRUE}
+# Make sure y_train_factor exists
+y_train_factor <- factor(y_train)
+
+# Extract the selected gene from X_train using its COLUMN INDEX
+gene_values <- X_train[, idx_top]
+
+# Optional: print which gene (name from coef) this corresponds to
+cat("Selected gene (from coefficients):", gene_top, "\n")
+cat("Column index in X_train:", idx_top, "\n")
+
+# Boxplot: gene expression by class
+boxplot(gene_values ~ y_train_factor,
+        xlab = "Tumor class",
+        ylab = paste("Expression of", gene_top),
+        main = paste("Gene", gene_top, "vs. class (training data)"))
+
+# Add points (optional)
+stripchart(gene_values ~ y_train_factor,
+           vertical = TRUE, method = "jitter",
+           pch = 19, col = rgb(0,0,0,0.5), add = TRUE)
+```
+
+We see a distinct visual seperation between the importance of selected predictor V1427 for class 1 and the other three classes.
+
+### e) predicition of group membership of test data
+
+```{r, echo=TRUE}
+# 1) Get optimal lambda from CV (TRAINING ONLY)
+lambda_opt <- fit_cv$lambda.min
+cat("Using lambda_opt =", lambda_opt, "\n\n")
+
+# 2) Predict class probabilities on the TEST set
+prob_test <- predict(
+  fit_cv,
+  newx = X_test,
+  s = lambda_opt,
+  type = "response"
+)
+
+# prob_test can be either:
+# - a 3D array: [n_test, n_classes, 1], or
+# - a list of matrices (one per class), depending on glmnet version.
+# We handle both cases:
+
+if (is.array(prob_test)) {
+  # shape: n_test x n_classes x 1  -> drop 3rd dimension
+  prob_mat <- prob_test[, , 1]
+} else if (is.list(prob_test)) {
+  # each list element is n_test x 1 -> bind columns
+  prob_mat <- do.call(cbind, lapply(prob_test, as.vector))
+} else {
+  stop("Unexpected structure of prob_test")
+}
+
+# 3) Predicted class = index of max probability per row
+# max.col() returns 1,2,3,4 corresponding to the class index
+pred_class <- max.col(prob_mat)
+
+# 4) True classes as numeric 1,2,3,4
+y_test_factor <- factor(y_test)           # ensure factor
+true_class <- as.numeric(y_test_factor)   # 1,2,3,4
+
+# Check lengths (should both be 20 here)
+cat("Length pred_class:", length(pred_class), "\n")
+cat("Length true_class:", length(true_class), "\n\n")
+
+# 5) Confusion table
+conf_mat <- table(Predicted = pred_class, Actual = true_class)
+cat("Confusion matrix (test data):\n")
+print(conf_mat)
+
+# 6) Misclassification error on test data
+misclass_error <- mean(pred_class != true_class)
+cat("\nMisclassification error (test data):", round(misclass_error, 4), "\n")
+```
+
+Apparantly the Khan data is almost perfectly linearly seperable. It is verhy high dimensional (2308 gene expression features) and the classes (4 biologically different tumor types) cluster in differnet directions of gene space.
+
+### Disclaimer
+
+Generative AI such as LLMs might have been used for code and text generation in this file

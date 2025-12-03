@@ -38,6 +38,317 @@ d_test  <- d[test, ]
 
 ```
 
+Helper Function for Evaluation
+
+```{r, echo=TRUE}
+# Load the library for LDA
+library(MASS)
+
+# Helper function to compute and print evaluation metrics
+calculate_metrics <- function(actual, predicted, model_name = "Model") {
+  # Create a confusion matrix
+  conf_matrix <- table(Predicted = predicted, Actual = actual)
+  
+  # Print the header and confusion matrix
+  cat("--- Evaluation for:", model_name, "---\n")
+  print(conf_matrix)
+  cat("\n")
+  
+  # Extract TP, TN, FP, FN
+  # 'yes' is the positive class
+  TP <- conf_matrix["yes", "yes"]
+  TN <- conf_matrix["no", "no"]
+  FP <- conf_matrix["yes", "no"]
+  FN <- conf_matrix["no", "yes"]
+  
+  # Calculate Metrics
+  misclassification_rate <- (FP + FN) / sum(conf_matrix)
+  
+  # TPR (Sensitivity or Recall)
+  tpr <- TP / (TP + FN)
+  
+  # TNR (Specificity)
+  tnr <- TN / (TN + FP)
+  
+  # Balanced Accuracy
+  balanced_accuracy <- (tpr + tnr) / 2
+  
+  # Print the metrics
+  cat("Misclassification Rate:", round(misclassification_rate, 4), "\n")
+  cat("True Positive Rate (Sensitivity):", round(tpr, 4), "\n")
+  cat("True Negative Rate (Specificity):", round(tnr, 4), "\n")
+  cat("Balanced Accuracy:", round(balanced_accuracy, 4), "\n")
+  cat("----------------------------------\n\n")
+  
+  # Return the metrics in a list for potential further use
+  invisible(list(
+    conf_matrix = conf_matrix,
+    misclassification_rate = misclassification_rate,
+    tpr = tpr,
+    tnr = tnr,
+    balanced_accuracy = balanced_accuracy
+  ))
+}
+```
+
 ## 1. LDA (Linear Discrimant Analysis)
 
+### a) `lda()` on the training set
+
+```{r, echo=TRUE}
+# 1a. Apply LDA to the training set
+lda_model <- lda(y ~ ., data = d_train)
+
+# We can print the model to see the prior probabilities and group means
+print(lda_model)
+
+```
+
+-   **Categorical Variables**: The `lda` function from the `MASS` package can handle factor (categorical) variables directly. It internally converts them into dummy variables. Therefore, it is not necessary to manually perform one-hot encoding.
+-   **Assumptions** **of LDA**: LDA assumes that the predictors for each class are drawn from a multivariate normal distribution and that all classes share a common covariance matrix. Our dataset contains many categorical predictors (e.g., job, marital, default), which are represented as binary dummy variables (0 or 1). These binary variables do not follow a normal distribution, so this core assumption is violated.
+-   **Scaling**: LDA can be sensitive to the scaling of the predictors. Predictors with large variance might dominate the model. Therefore, it is generally advisable to standardize the numerical predictors (like age, balance, campaign) to have a mean of 0 and a standard deviation of 1.
+
+**Conclusion**: While the `lda` function runs without explicit preprocessing, its underlying mathematical assumptions are violated by the categorical predictors. For better performance and stability, scaling the numerical variables would be advisable. However, for this exercise, we will proceed without it to see the baseline performance.
+
+### b) evaluation measures for the training data
+
+We use the trained `lda_model` to predict the classes for the same data it was trained on (`d_train`) and then use our helper function to evaluate the performance.
+
+```{r, echo=TRUE}
+# 1b. Predict on the training data
+train_pred_lda <- predict(lda_model, newdata = d_train)
+
+# Compute and print evaluation measures for the training set
+calculate_metrics(actual = d_train$y, predicted = train_pred_lda$class, model_name = "LDA on Training Set")
+
+```
+
+-   **High Specificity, Low Sensitivity**: The model has a very high True Negative Rate (TNR or Specificity), meaning it is excellent at correctly identifying clients who will not subscribe ('no').
+-   **Poor Minority Class Prediction**: However, the model has a very low True Positive Rate (TPR or Sensitivity). It correctly identifies only a small fraction of the clients who will subscribe ('yes'). This is evident from the high number of False Negatives (FN) compared to True Positives (TP).
+-   **Misleading Misclassification Rate:** The overall misclassification rate seems low (around 10.6%). This is misleading because the model achieves this by simply predicting the majority class ('no') most of the time.
+-   **Low Balanced Accuracy**: The balanced accuracy is quite low (around 0.605). This metric, which averages the TPR and TNR, gives a much better picture of the actual performance on an imbalanced dataset and shows that the model is not very effective. The model is clearly biased towards the majority class due to the data imbalance.
+
+### c) evaluation measures for the test data
+
+```{r, echo=TRUE}
+# 1c. Predict on the test data
+test_pred_lda <- predict(lda_model, newdata = d_test)
+
+# Compute and print evaluation measures for the test set
+calculate_metrics(actual = d_test$y, predicted = test_pred_lda$class, model_name = "LDA on Test Set")
+
+```
+
+The results (and corresponding conclusions) are very **similar to the training set**. The practical usefulness for the bank is not ideal that way.
+
 ## 2. maximize the balanced accuracy
+
+balanced version through sampling but still test on "real world" imbalanced data.
+
+### a) undersampling
+
+reduce the number of samples in the majority class to match the number of samples in the minority class
+
+```{r, echo=TRUE}
+# --- 2a. Undersampling ---
+
+# 1. Count the classes in the original training set
+table(d_train$y)
+
+# Get the size of the minority class ('yes')
+n_minority <- sum(d_train$y == "yes")
+cat("Number of 'yes' samples (minority class):", n_minority, "\n")
+
+# Get the indices for each class
+idx_no  <- which(d_train$y == "no")
+idx_yes <- which(d_train$y == "yes")
+
+# 2. Randomly sample from the majority class ('no') to match the minority class size
+set.seed(69) # for reproducibility
+idx_no_downsampled <- sample(idx_no, size = n_minority)
+
+# 3. Combine the indices and create the new undersampled training set
+d_train_under <- d_train[c(idx_yes, idx_no_downsampled), ]
+
+# Verify that the new training set is balanced
+cat("\nClass distribution in the new undersampled training set:\n")
+table(d_train_under$y)
+
+# Now, repeat tasks 1(a)-(c) with the undersampled data
+# Train the LDA model on the balanced (undersampled) data
+lda_under_model <- lda(y ~ ., data = d_train_under)
+
+# Evaluate on the new (undersampled) training data
+train_pred_under <- predict(lda_under_model, newdata = d_train_under)
+calculate_metrics(actual = d_train_under$y, predicted = train_pred_under$class, 
+                  model_name = "LDA on Undersampled Training Set")
+
+# Evaluate on the ORIGINAL, UNCHANGED test data
+test_pred_under <- predict(lda_under_model, newdata = d_test)
+calculate_metrics(actual = d_test$y, predicted = test_pred_under$class, 
+                  model_name = "LDA (Undersampled) on Test Set")
+```
+
+### b) oversampling
+
+increase the number of samples in the minority class to match the number of samples in the majority class
+
+```{r, echo=TRUE}
+# --- 2b. Oversampling ---
+
+# 1. Get the size of the majority class ('no')
+n_majority <- sum(d_train$y == "no")
+cat("Number of 'no' samples (majority class):", n_majority, "\n")
+
+# We still have the indices for each class from before (idx_no, idx_yes)
+
+# 2. Randomly sample WITH REPLACEMENT from the minority class ('yes')
+set.seed(69) # for reproducibility
+idx_yes_upsampled <- sample(idx_yes, size = n_majority, replace = TRUE)
+
+# 3. Combine the indices and create the new oversampled training set
+d_train_over <- d_train[c(idx_no, idx_yes_upsampled), ]
+
+# Verify that the new training set is balanced
+cat("\nClass distribution in the new oversampled training set:\n")
+table(d_train_over$y)
+
+# Now, repeat tasks 1(a)-(c) with the oversampled data
+# Train the LDA model on the balanced (oversampled) data
+lda_over_model <- lda(y ~ ., data = d_train_over)
+
+# Evaluate on the new (oversampled) training data
+train_pred_over <- predict(lda_over_model, newdata = d_train_over)
+calculate_metrics(actual = d_train_over$y, predicted = train_pred_over$class, 
+                  model_name = "LDA on Oversampled Training Set")
+
+# Evaluate on the ORIGINAL, UNCHANGED test data
+test_pred_over <- predict(lda_over_model, newdata = d_test)
+calculate_metrics(actual = d_test$y, predicted = test_pred_over$class, 
+                  model_name = "LDA (Oversampled) on Test Set")
+
+```
+
+Both oversampling and undersampling are far more successful than the original model. They both achieve a liittle higher Balanced Accuracy on the test set (around 0.65) compared to the original model (around 0.60).
+
+Between the two, undersampling is slightly more successful, achieving a balanced accuracy of 0.6550 compared to oversampling's 0.6535.
+
+#### Oversampling vs. Undersampling:
+
+-   **Undersampling** discards a large amount of data from the majority class. In our case, we went from over 2,700 'no' samples to just 370. This is a significant loss of information, which could potentially remove valuable patterns within the majority class.
+-   **Oversampling** does not discard any data. Instead, it creates duplicate copies of the minority class samples. This allows the model to train on all the original majority class data while still achieving balance.
+
+While both methods work well here, oversampling is often preferred because it avoids information loss. By retaining all original data points, it can sometimes build a more robust and slightly better-performing model. We dont really observe it in this case but the predictions are very close. I tried some **other train/test splits and also got results the other way around** with oversampling being better than undersampling, though still having little to no difference.
+
+## 3. Quadratic Discrimant Analysis (QDA)
+
+### QDA with undersampling
+
+```{r, echo=TRUE}
+# # We will use the same undersampled training set: d_train_under
+# # and the same oversampled training set: d_train_over
+#
+# # Train the QDA model on the undersampled data
+# # Note: QDA can sometimes fail with "rank deficiency" if a predictor has no variance within a class.
+# # Our data should be fine, but it's a common issue to be aware of.
+# qda_under_model <- qda(y ~ ., data = d_train_under)
+#
+# # Predict on the ORIGINAL test set
+# test_pred_qda_under <- predict(qda_under_model, newdata = d_test)
+#
+# # Evaluate the performance on the test set
+# calculate_metrics(
+#   actual = d_test$y,
+#   predicted = test_pred_qda_under$class, 
+#   model_name = "QDA (Undersampled) on Test Set"
+# )
+```
+
+We have a problem with the rank deficiency in the group no since the predictor seems to haveno variance withing itself - we should use only numerical predictors(?)
+
+### QDA with oversampling
+
+```{r, echo=TRUE}
+# Train the QDA model on the oversampled data
+qda_over_model <- qda(y ~ ., data = d_train_over)
+
+# Predict on the ORIGINAL test set
+test_pred_qda_over <- predict(qda_over_model, newdata = d_test)
+
+# Evaluate the performance on the test set
+calculate_metrics(actual = d_test$y, predicted = test_pred_qda_over$class, 
+                  model_name = "QDA (Oversampled) on Test Set")
+```
+
+-   **High Sensitivity, Very Low Specificity:** QDA is even more aggressive than LDA in predicting the 'yes' class. The QDA model trained on oversampled data achieves a very high True Positive Rate (TPR) of over 81%, correctly identifying a large majority of potential subscribers. However, this comes at a huge cost: the True Negative Rate (TNR) plummets to below 45%. This means the model generates a massive number of false positives, incorrectly flagging more than half of the 'no' clients as potential subscribers.
+-   **Worse Balanced Accuracy:** Because of this extreme trade-off, the Balanced Accuracy for both QDA models is worse than for the LDA models. The flexibility of QDA seems to lead to overfitting on the training data's structure, causing it to perform poorly on the balanced accuracy metric for the unseen test data.
+-   **Oversampling vs. Undersampling for QDA**: With QDA, undersampling yielded a slightly better-balanced model than oversampling. However, neither strategy resulted in a model that outperformed the balanced LDA models from step 2. The more flexible QDA seems to be less robust for this particular dataset.
+
+## 4. Regularized Discrimant Analysis (RDA)
+
+RDA serves as a compromise between LDA and QDA. It introduces two tuning parameters, gamma and lambda, to create a more flexible and robust classifier.
+
+-   `gamma` tunes between LDA (gamma=1) and QDA (gamma=0).
+-   `lambda` regularizes (or "shrinks") the covariance matrix, which can help stabilize the model and prevent overfitting, especially when predictors are correlated.
+
+The rda() function automatically finds the optimal gamma and lambda by cross-validation. \### RDA with undersampling
+
+```{r, echo=TRUE}
+# Load the library for RDA
+library(klaR) 
+
+# Train the RDA model on the undersampled data
+rda_under_model <- rda(y ~ ., data = d_train_under)
+
+# Print the model to see the chosen tuning parameters
+cat("--- RDA (Undersampled) Model Details ---\n")
+print(rda_under_model)
+cat("\n")
+
+# Predict on the ORIGINAL test set
+test_pred_rda_under <- predict(rda_under_model, newdata = d_test)
+
+# Evaluate the performance on the test set
+# The predict function for rda returns a list with a component named 'class'
+calculate_metrics(actual = d_test$y, predicted = test_pred_rda_under$class, 
+                  model_name = "RDA (Undersampled) on Test Set")
+
+```
+
+### RDA with oversampling
+
+```{r, echo=TRUE}
+# Train the RDA model on the oversampled data
+rda_over_model <- rda(y ~ ., data = d_train_over)
+
+# Print the model to see the chosen tuning parameters
+cat("--- RDA (Oversampled) Model Details ---\n")
+print(rda_over_model)
+cat("\n")
+
+# Predict on the ORIGINAL test set
+test_pred_rda_over <- predict(rda_over_model, newdata = d_test)
+
+# Evaluate the performance on the test set
+calculate_metrics(actual = d_test$y, predicted = test_pred_rda_over$class, 
+                  model_name = "RDA (Oversampled) on Test Set")
+
+```
+
+### Interpretation of RDA Tuning Parameters
+
+#### Undersampled RDA
+
+The model chooses $\gamma \approx 1$ and $\lambda \approx 0$, meaning that it effectively collapses to an LDA--like classifier with almost no covariance shrinkage. This occurs because the undersampled dataset is too small and unstable to estimate class--specific covariance matrices. As a result, performance is poor, especially in terms of specificity.
+
+#### Oversampled RDA
+
+With oversampling, the model again selects $\gamma \approx 1$, indicating a preference for an LDA--type covariance structure. However, the estimated $\lambda \approx 0.77$ implies strong regularization, which stabilizes the covariance estimates. This leads to noticeably better balanced accuracy and a more reasonable trade--off between sensitivity and specificity.
+
+### Conclusion
+
+RDA trained on the oversampled dataset provides the best performance among the discriminant models. The combination of LDA--like structure ($\gamma \approx 1$) and substantial shrinkage ($\lambda \approx 0.77$) yields the most balanced and robust classifier. We therefore recommend using RDA with oversampling for this problem.
+
+### Disclaimer
+
+Generative AI such as LLMs might have been used for code and text generation in this file

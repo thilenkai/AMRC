@@ -1,0 +1,94 @@
+---
+title: "Exercise8_KaiThilenius_12423567"
+author: "Kai Thilenius"
+date: "2025-12-01"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Exercise 8 - splines on `cars`
+
+
+## 0 Preparation, loading, spliting 
+```{r, echo=TRUE}
+# cars dataset is in the base 'datasets' package
+data("cars")   # or: library(datasets); data(cars)
+
+# Take a quick look
+head(cars)
+str(cars)
+summary(cars)
+
+# cars has:
+#  - speed: explanatory variable (mph)
+#  - dist : stopping distance (ft) -> this is the response
+```
+
+```{r, echo=TRUE}
+## 1. Train/test split (2/3 train, 1/3 test)
+
+We do a **random split** as they ask:
+
+```r
+```{r, echo=TRUE}
+set.seed(123)  # for reproducibility
+
+n <- nrow(cars)
+train_idx <- sample(1:n, size = round(2/3 * n))
+
+train_data <- cars[train_idx, ]
+test_data  <- cars[-train_idx, ]
+
+dim(train_data)
+dim(test_data)
+
+# For convenience, define x and y for training and test
+x_train <- train_data$speed
+y_train <- train_data$dist
+
+x_test  <- test_data$speed
+y_test  <- test_data$dist
+```
+
+```{r, echo=TRUE}
+set.seed(123)  # for reproducibility
+
+n <- nrow(cars)
+train_idx <- sample(1:n, size = round(2/3 * n))
+
+train_data <- cars[train_idx, ]
+test_data  <- cars[-train_idx, ]
+
+dim(train_data)
+dim(test_data)
+
+# For convenience, define x and y for training and test
+x_train <- train_data$speed
+y_train <- train_data$dist
+
+x_test  <- test_data$speed
+y_test  <- test_data$dist
+```
+
+```{r, echo=TRUE}
+
+```
+
+```{r, echo=TRUE}
+
+```
+
+```{r, echo=TRUE}
+
+```
+
+
+```{r, echo=TRUE}
+
+```
+
+### Disclaimer
+Generative AI such as LLMs might have been used for code and text generation in this file
